@@ -1,0 +1,95 @@
+<?php
+$canVerifikasi = hasAccess($role, 'maintenance', 'verifikasi');
+$canApprove = hasAccess($role, 'maintenance', 'approve');
+$canKelola = hasAccess($role, 'maintenance', 'kelola');
+$fasilitasList = $conn->query("SELECT * FROM fasilitas ORDER BY id")->fetch_all(MYSQLI_ASSOC);
+$totalOpen = $conn->query("SELECT COUNT(*) n FROM pengajuan_maintenance WHERE status NOT IN ('selesai','ditolak')")->fetch_assoc()['n'];
+$totalSelesai = $conn->query("SELECT COUNT(*) n FROM pengajuan_maintenance WHERE status='selesai'")->fetch_assoc()['n'];
+?>
+<div class="stat-grid">
+    <div class="stat-card"><div class="stat-icon" style="background:#145c3f"><i data-lucide="building-2"></i></div><h3><?= count($fasilitasList) ?></h3><p>Fasilitas Terdaftar</p></div>
+    <div class="stat-card"><div class="stat-icon" style="background:#a97c22"><i data-lucide="loader"></i></div><h3><?= $totalOpen ?></h3><p>Dalam Proses</p></div>
+    <div class="stat-card"><div class="stat-icon" style="background:#145c3f"><i data-lucide="check-circle"></i></div><h3><?= $totalSelesai ?></h3><p>Selesai</p></div>
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <div><h2>Pengajuan Maintenance Fasilitas</h2><p>Alur: Pengajuan → Verifikasi (Team Leader) → Approval (SPV Sapras) → Pelaksanaan (Engineering).</p></div>
+        <div class="hgroup"><div id="toolbarMaintenance"></div><button class="btn btn-primary" onclick="openModal('modalAjukan')"><i data-lucide="plus"></i> Ajukan Maintenance</button></div>
+    </div>
+    <div class="table-wrap">
+        <table class="dtable table table-hover align-middle mb-0" id="tblMaintenance">
+            <thead><tr><th>Fasilitas</th><th>Deskripsi Kerusakan</th><th>Pemohon</th><th>Status</th><th>Teknisi</th><th>Aksi</th></tr></thead>
+            <tbody id="maintBody"><tr><td colspan="6" class="empty-row">Memuat data...</td></tr></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modalAjukan">
+    <div class="modal">
+        <div class="modal-head"><h3>Ajukan Perbaikan/Perawatan Fasilitas</h3><button class="modal-close" onclick="closeModal('modalAjukan')"><i data-lucide="x"></i></button></div>
+        <div class="modal-body">
+            <div class="fld"><label>Fasilitas</label>
+                <select id="mFasilitas"><?php foreach ($fasilitasList as $f) echo '<option value="' . $f['id'] . '">' . htmlspecialchars($f['nama_fasilitas']) . ' — ' . htmlspecialchars($f['lokasi']) . '</option>'; ?></select>
+            </div>
+            <div class="fld"><label>Deskripsi Kerusakan</label><textarea id="mDeskripsi" placeholder="Jelaskan kondisi kerusakan..."></textarea></div>
+        </div>
+        <div class="modal-foot"><button class="btn btn-outline" onclick="closeModal('modalAjukan')">Batal</button><button class="btn btn-primary" onclick="ajukanMaint()">Ajukan</button></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modalProses">
+    <div class="modal">
+        <div class="modal-head"><h3>Update Proses Maintenance</h3><button class="modal-close" onclick="closeModal('modalProses')"><i data-lucide="x"></i></button></div>
+        <div class="modal-body">
+            <input type="hidden" id="prosesId">
+            <div class="fld"><label>Hasil / Progres Pekerjaan</label><textarea id="prosesHasil"></textarea></div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-outline" onclick="simpanProses(0)">Simpan Progres</button>
+            <button class="btn btn-primary" onclick="simpanProses(1)"><i data-lucide="check"></i> Tandai Selesai</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const M_VERIFIKASI = <?= $canVerifikasi ? 'true' : 'false' ?>;
+const M_APPROVE = <?= $canApprove ? 'true' : 'false' ?>;
+const M_KELOLA = <?= $canKelola ? 'true' : 'false' ?>;
+const mBadge = { diajukan:'b-gray', diverifikasi:'b-blue', disetujui:'b-green', ditolak:'b-red', dikerjakan:'b-purple', selesai:'b-green' };
+const mLabel = { diajukan:'Diajukan', diverifikasi:'Diverifikasi TL', disetujui:'Disetujui SPV', ditolak:'Ditolak', dikerjakan:'Dikerjakan', selesai:'Selesai' };
+
+async function ajukanMaint() {
+    const r = await apiFetch('maintenance', 'ajukan', { fasilitas_id: document.getElementById('mFasilitas').value, deskripsi_kerusakan: document.getElementById('mDeskripsi').value });
+    if (r.ok) { toast('Pengajuan maintenance terkirim.', 'success'); closeModal('modalAjukan'); loadMaint(); } else toast(r.msg, 'error');
+}
+async function loadMaint() {
+    const r = await apiFetch('maintenance', 'list_pengajuan', {}, 'GET');
+    if (!r.ok) return;
+    document.getElementById('maintBody').innerHTML = r.data.length ? r.data.map(p => {
+        let aksi = '<span style="color:#9ca3af;font-size:12px">—</span>';
+        if (p.status === 'diajukan' && M_VERIFIKASI) aksi = pair('verifikasi', p.id, 'valid');
+        else if (p.status === 'diverifikasi' && M_APPROVE) aksi = pair('approve', p.id, 'setuju');
+        else if ((p.status === 'disetujui' || p.status === 'dikerjakan') && M_KELOLA) aksi = `<button class="btn btn-outline btn-sm" onclick="bukaProses(${p.id},'${(p.hasil_pekerjaan||'').replace(/'/g,"\\'")}')"><i data-lucide="hammer"></i> Proses</button>`;
+        return `<tr><td>${p.nama_fasilitas}</td><td>${p.deskripsi_kerusakan}</td><td>${p.pemohon_nama}</td>
+        <td><span class="badge ${mBadge[p.status]}">${mLabel[p.status]}</span></td><td>${p.teknisi_nama||'-'}</td><td class="actions-cell">${aksi}</td></tr>`;
+    }).join('') : '<tr><td colspan="6" class="empty-row">Belum ada pengajuan maintenance.</td></tr>';
+    lucide.createIcons();
+}
+function pair(action, id, field) {
+    return `<button class="btn btn-primary btn-sm" onclick="proses1('${action}',${id},'${field}',1)"><i data-lucide="check"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="proses1('${action}',${id},'${field}',0)"><i data-lucide="x"></i></button>`;
+}
+async function proses1(action, id, field, val) {
+    const payload = { id }; payload[field] = val;
+    const r = await apiFetch('maintenance', action, payload);
+    if (r.ok) { toast('Berhasil diproses.', 'success'); loadMaint(); } else toast(r.msg, 'error');
+}
+function bukaProses(id, hasil) { document.getElementById('prosesId').value = id; document.getElementById('prosesHasil').value = hasil; openModal('modalProses'); }
+async function simpanProses(selesai) {
+    const r = await apiFetch('maintenance', 'proses', { id: document.getElementById('prosesId').value, hasil_pekerjaan: document.getElementById('prosesHasil').value, selesai });
+    if (r.ok) { toast(selesai ? 'Maintenance ditandai selesai.' : 'Progres disimpan.', 'success'); closeModal('modalProses'); loadMaint(); } else toast(r.msg, 'error');
+}
+loadMaint();
+renderExportToolbar('#toolbarMaintenance', 'tblMaintenance', 'maintenance_fasilitas', 'Pengajuan Maintenance Fasilitas');
+</script>
