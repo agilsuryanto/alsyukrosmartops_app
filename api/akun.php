@@ -52,6 +52,11 @@ switch ($action) {
         logAktivitas($user['id'], 'akun', "Reset password akun #$id");
         ok();
 
+    case 'hak_akses':
+        $role_kode = $_GET['role'] ?? $_POST['role'] ?? '';
+        $matrix = getRoleAccessMatrix($role_kode);
+        ok($matrix);
+
     default:
         fail('Aksi tidak dikenal.');
 }

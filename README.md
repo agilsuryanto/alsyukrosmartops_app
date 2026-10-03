@@ -32,7 +32,7 @@ tanpa mengubah kode (lihat `config/auth.php` fungsi `hasAccess()`).
 ## 4. Alur Persetujuan per Modul (sudah diuji end-to-end)
 - **Inventaris**: Ajukan → Verifikasi (Staff Inventaris) → Approve (SPV Inventaris) → Kembalikan.
 - **Maintenance**: Ajukan → Verifikasi (Team Leader) → Approve (SPV Sapras) → Kerjakan (Engineering).
-- **Event**: Ajukan → Verifikasi (SPV CRM/Staff CRM) → Approve (Manajer MARKOM). Sistem otomatis menolak jadwal yang bentrok (lokasi & jam sama).
+- **Event**: Ajukan → Persetujuan Atasan Unit Pengaju (jika ada) → Verifikasi (SPV CRM) → Approve (Manajer MARKOM). Sistem otomatis menolak jadwal yang bentrok (lokasi & jam sama).
 - **Karyawan**: SPV Sapras & Team Leader memberi kegiatan ke CSO/Gardener → mereka input hasil → SPV Sapras memberi penilaian kinerja. Manajer/Staff HRD mengelola data administratif (tanpa wewenang menilai).
 - **Arsip**: Staff/Manajer QMS unggah & klasifikasi dokumen, atur tingkat akses (umum/terbatas/rahasia), dan backup. Hampir semua peran lain punya akses "simpan & akses dokumen" (bukan pengelola).
 - **Pengajuan Lintas Divisi** (modul `pengajuan_unit`, menggantikan alur lama yang cuma untuk TU): setiap divisi yang bukan pengelola langsung sebuah modul mengajukan kebutuhan Inventaris/Maintenance/Event lewat sini, lalu **atasan langsungnya** meng-approve sebelum diteruskan otomatis ke pengelola modul terkait:

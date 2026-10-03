@@ -45,11 +45,13 @@ if ($page === 'akun' && $user['role'] !== 'admin') {
 <!-- Bootstrap 5 (framework CSS utama aplikasi) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <script src="https://unpkg.com/lucide@latest"></script>
-<link rel="stylesheet" href="css/app.css">
-<script src="js/main.js"></script>
+<link rel="stylesheet" href="css/app.css?v=<?= time() ?>">
+<script src="js/main.js?v=<?= time() ?>"></script>
 <script src="js/export.js"></script>
 <!-- Bootstrap 5 JS bundle (Popper termasuk) -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+<!-- SweetAlert2 untuk pop-up notifikasi -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11" defer></script>
 </head>
 <body>
 <div class="app-shell">
@@ -104,8 +106,28 @@ async function loadNotif() {
     if (r.ok) {
         dot.style.display = r.unread > 0 ? 'block' : 'none';
         const panel = document.getElementById('notifPanel');
+        
+        const pageMap = {
+            'inventaris': 'inventory',
+            'karyawan': 'karyawan',
+            'event': 'event',
+            'maintenance': 'maintenance',
+            'arsip': 'arsip',
+            'laporan': 'laporan',
+            'pengajuan_unit': 'dashboard'
+        };
+
         panel.innerHTML = r.data.length
-            ? r.data.map(n => `<div class="notif-item"><b>${n.modul_asal}</b>${n.pesan}<div><span>${n.waktu}</span></div></div>`).join('')
+            ? r.data.map(n => {
+                let targetPage = pageMap[n.modul_asal] || n.modul_asal;
+                if (n.modul_asal === 'inventaris') {
+                    if (n.pesan.toLowerCase().includes('pinjam')) targetPage += '&tab=pinjam';
+                    else if (n.pesan.toLowerCase().includes('kembali')) targetPage += '&tab=pengembalian';
+                }
+                return `<div class="notif-item" style="cursor:pointer;" onclick="window.location.href='dashboard.php?page=${targetPage}'">
+                    <b>${n.modul_asal.toUpperCase()}</b>${n.pesan}<div><span>${n.waktu}</span></div>
+                </div>`;
+            }).join('')
             : '<div class="notif-item" style="text-align:center;color:#9ca3af">Tidak ada notifikasi</div>';
     }
 }

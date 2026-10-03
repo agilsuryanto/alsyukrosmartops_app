@@ -22,16 +22,9 @@ if (in_array('arsip', $modules)) {
     $n = $conn->query("SELECT COUNT(*) n FROM arsip")->fetch_assoc()['n'];
     $cards[] = ['icon' => 'archive', 'color' => '#1f7a6c', 'label' => 'Total Dokumen Arsip', 'value' => $n, 'link' => 'arsip'];
 }
-if (in_array('pengajuan_unit', $modules)) {
-    $n = $conn->query("SELECT COUNT(*) n FROM pengajuan_unit WHERE status='diajukan'")->fetch_assoc()['n'];
-    $label = hasAccess($role, 'pengajuan_unit', 'approve') ? 'Pengajuan Menunggu Approval Anda' : 'Pengajuan Lintas Divisi Menunggu';
-    if (hasAccess($role, 'pengajuan_unit', 'approve')) {
-        $n = $conn->query("SELECT COUNT(*) n FROM pengajuan_unit WHERE status='diajukan' AND approver_role='" . $conn->real_escape_string($role) . "'" . ($role === 'kepala_sekolah' ? " AND unit_id=" . (int)$user['unit_id'] : ""))->fetch_assoc()['n'];
-    }
-    $cards[] = ['icon' => 'file-text', 'color' => '#b3392b', 'label' => $label, 'value' => $n, 'link' => 'pengajuan_unit'];
-}
 
-$logs = $conn->prepare("SELECT l.*, u.name FROM log_aktivitas l JOIN users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 8");
+
+$logs = $conn->prepare("SELECT l.*, u.name FROM log_aktivitas l JOIN users u ON u.id=l.user_id WHERE l.id IN (SELECT MAX(id) FROM log_aktivitas GROUP BY modul) ORDER BY l.id DESC LIMIT 8");
 $logs->execute();
 $recentLogs = $logs->get_result()->fetch_all(MYSQLI_ASSOC);
 ?>
@@ -79,6 +72,8 @@ $recentLogs = $logs->get_result()->fetch_all(MYSQLI_ASSOC);
         </table>
     </div>
 </div>
+
+
 <script>
 renderExportToolbar('#toolbarAktivitas', 'tblAktivitas', 'aktivitas_terbaru', 'Aktivitas Terbaru');
 </script>

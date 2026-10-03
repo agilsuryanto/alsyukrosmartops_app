@@ -181,14 +181,17 @@ CREATE TABLE peminjaman (
   tanggal_pinjam DATE NOT NULL,
   rencana_kembali DATE DEFAULT NULL,
   keperluan VARCHAR(255) DEFAULT NULL,
-  status ENUM('diajukan','diverifikasi','disetujui','ditolak','dikembalikan') NOT NULL DEFAULT 'diajukan',
+  status VARCHAR(50) NOT NULL DEFAULT 'diajukan',
   verifikator_id INT DEFAULT NULL,   -- Staff Inventaris
+  atasan_id INT DEFAULT NULL,        -- Atasan Unit
+  catatan_atasan VARCHAR(255) DEFAULT NULL,
   approval_id INT DEFAULT NULL,      -- SPV Inventaris
   catatan VARCHAR(255) DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (barang_id) REFERENCES barang(id),
   FOREIGN KEY (peminjam_id) REFERENCES users(id),
   FOREIGN KEY (verifikator_id) REFERENCES users(id),
+  FOREIGN KEY (atasan_id) REFERENCES users(id),
   FOREIGN KEY (approval_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
@@ -218,15 +221,18 @@ CREATE TABLE pengajuan_maintenance (
   fasilitas_id INT NOT NULL,
   pemohon_id INT NOT NULL,
   deskripsi_kerusakan TEXT NOT NULL,
-  status ENUM('diajukan','diverifikasi','disetujui','ditolak','dikerjakan','selesai') NOT NULL DEFAULT 'diajukan',
+  status VARCHAR(50) NOT NULL DEFAULT 'diajukan',
   tl_verifikasi_id INT DEFAULT NULL, -- Team Leader
   spv_approval_id INT DEFAULT NULL,  -- SPV Sapras
+  atasan_id INT DEFAULT NULL,        -- Atasan Unit
+  catatan_atasan VARCHAR(255) DEFAULT NULL,
   tanggal_pengajuan DATE NOT NULL,
   catatan VARCHAR(255) DEFAULT NULL,
   FOREIGN KEY (fasilitas_id) REFERENCES fasilitas(id),
   FOREIGN KEY (pemohon_id) REFERENCES users(id),
   FOREIGN KEY (tl_verifikasi_id) REFERENCES users(id),
-  FOREIGN KEY (spv_approval_id) REFERENCES users(id)
+  FOREIGN KEY (spv_approval_id) REFERENCES users(id),
+  FOREIGN KEY (atasan_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE proses_maintenance (
@@ -248,13 +254,16 @@ CREATE TABLE event (
   nama_event VARCHAR(120) NOT NULL,
   pemohon_id INT NOT NULL,
   deskripsi TEXT DEFAULT NULL,
-  status ENUM('diajukan','diverifikasi','disetujui','ditolak','berlangsung','selesai') NOT NULL DEFAULT 'diajukan',
+  status VARCHAR(50) NOT NULL DEFAULT 'diajukan',
   verifikator_id INT DEFAULT NULL,   -- SPV CRM / Staff CRM
   approval_id INT DEFAULT NULL,      -- Manajer MARKOM
+  atasan_id INT DEFAULT NULL,        -- Atasan Unit
+  catatan_atasan VARCHAR(255) DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (pemohon_id) REFERENCES users(id),
   FOREIGN KEY (verifikator_id) REFERENCES users(id),
-  FOREIGN KEY (approval_id) REFERENCES users(id)
+  FOREIGN KEY (approval_id) REFERENCES users(id),
+  FOREIGN KEY (atasan_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE jadwal_event (
@@ -420,6 +429,7 @@ JOIN (
   -- approve pengajuan Maintenance yang diajukan Staff Inventaris sebelum
   -- diteruskan ke Team Leader/SPV Sapras + user Arsip
   UNION SELECT 'spv_inventaris','inventaris','lihat' UNION SELECT 'spv_inventaris','inventaris','approve' UNION SELECT 'spv_inventaris','inventaris','monitoring'
+  UNION SELECT 'spv_inventaris','maintenance','lihat' UNION SELECT 'spv_inventaris','maintenance','approve_atasan'
   UNION SELECT 'spv_inventaris','pengajuan_unit','lihat' UNION SELECT 'spv_inventaris','pengajuan_unit','approve'
   UNION SELECT 'spv_inventaris','arsip','lihat' UNION SELECT 'spv_inventaris','arsip','tambah'
   UNION SELECT 'spv_inventaris','laporan','lihat'
@@ -428,6 +438,7 @@ JOIN (
   -- Inventaris untuk approve, konfirmasi pengembalian barang + membuat
   -- pengajuan Maintenance (diapprove SPV Inventaris) + user Arsip
   UNION SELECT 'staff_inventaris','inventaris','lihat' UNION SELECT 'staff_inventaris','inventaris','tambah' UNION SELECT 'staff_inventaris','inventaris','kelola' UNION SELECT 'staff_inventaris','inventaris','verifikasi'
+  UNION SELECT 'staff_inventaris','maintenance','lihat' UNION SELECT 'staff_inventaris','maintenance','ajukan'
   UNION SELECT 'staff_inventaris','pengajuan_unit','lihat' UNION SELECT 'staff_inventaris','pengajuan_unit','ajukan'
   UNION SELECT 'staff_inventaris','arsip','lihat' UNION SELECT 'staff_inventaris','arsip','tambah'
 
@@ -435,6 +446,7 @@ JOIN (
   -- penilaian Manajemen Karyawan + approve pengajuan Inventaris yang
   -- diajukan Team Leader sebelum diteruskan ke Staff Inventaris + Arsip
   UNION SELECT 'spv_sapras','maintenance','lihat' UNION SELECT 'spv_sapras','maintenance','approve' UNION SELECT 'spv_sapras','maintenance','monitoring'
+  UNION SELECT 'spv_sapras','inventaris','lihat' UNION SELECT 'spv_sapras','inventaris','approve_atasan'
   UNION SELECT 'spv_sapras','karyawan','lihat' UNION SELECT 'spv_sapras','karyawan','kelola' UNION SELECT 'spv_sapras','karyawan','penilaian'
   UNION SELECT 'spv_sapras','pengajuan_unit','lihat' UNION SELECT 'spv_sapras','pengajuan_unit','approve'
   UNION SELECT 'spv_sapras','arsip','lihat' UNION SELECT 'spv_sapras','arsip','tambah'
@@ -442,9 +454,11 @@ JOIN (
 
   -- Team Leader: pengelola & cek pengajuan Maintenance sebelum dikirim ke
   -- SPV Sapras + pengelola & memberi kegiatan harian/non-harian karyawan
+  -- SPV Sapras) + pengelola & memberi kegiatan harian/non-harian karyawan
   -- (CSO/Gardener) + membuat pengajuan Inventaris (diapprove SPV Sapras) + Arsip
   UNION SELECT 'team_leader','maintenance','lihat' UNION SELECT 'team_leader','maintenance','verifikasi'
   UNION SELECT 'team_leader','karyawan','lihat' UNION SELECT 'team_leader','karyawan','kelola'
+  UNION SELECT 'team_leader','inventaris','lihat' UNION SELECT 'team_leader','inventaris','ajukan'
   UNION SELECT 'team_leader','pengajuan_unit','lihat' UNION SELECT 'team_leader','pengajuan_unit','ajukan'
   UNION SELECT 'team_leader','arsip','lihat' UNION SELECT 'team_leader','arsip','tambah'
 
@@ -461,6 +475,9 @@ JOIN (
   -- approve pengajuan Inventaris, EMS & Maintenance dari Staff HRD sebelum
   -- diteruskan ke pengelola modul terkait + Arsip
   UNION SELECT 'manajer_hrd','karyawan','lihat' UNION SELECT 'manajer_hrd','karyawan','tambah' UNION SELECT 'manajer_hrd','karyawan','kelola'
+  UNION SELECT 'manajer_hrd','inventaris','lihat' UNION SELECT 'manajer_hrd','inventaris','approve_atasan'
+  UNION SELECT 'manajer_hrd','maintenance','lihat' UNION SELECT 'manajer_hrd','maintenance','approve_atasan'
+  UNION SELECT 'manajer_hrd','event','lihat' UNION SELECT 'manajer_hrd','event','approve_atasan'
   UNION SELECT 'manajer_hrd','pengajuan_unit','lihat' UNION SELECT 'manajer_hrd','pengajuan_unit','approve'
   UNION SELECT 'manajer_hrd','arsip','lihat' UNION SELECT 'manajer_hrd','arsip','tambah'
   UNION SELECT 'manajer_hrd','laporan','lihat'
@@ -468,6 +485,9 @@ JOIN (
   -- Staff HRD: pengelolaan administrasi/rekap/arsip data karyawan + membuat
   -- pengajuan Inventaris, EMS & Maintenance (diapprove Manajer HRD) + Arsip
   UNION SELECT 'staff_hrd','karyawan','lihat' UNION SELECT 'staff_hrd','karyawan','tambah' UNION SELECT 'staff_hrd','karyawan','kelola'
+  UNION SELECT 'staff_hrd','inventaris','lihat' UNION SELECT 'staff_hrd','inventaris','ajukan'
+  UNION SELECT 'staff_hrd','maintenance','lihat' UNION SELECT 'staff_hrd','maintenance','ajukan'
+  UNION SELECT 'staff_hrd','event','lihat' UNION SELECT 'staff_hrd','event','ajukan'
   UNION SELECT 'staff_hrd','pengajuan_unit','lihat' UNION SELECT 'staff_hrd','pengajuan_unit','ajukan'
   UNION SELECT 'staff_hrd','arsip','lihat' UNION SELECT 'staff_hrd','arsip','tambah'
 
@@ -475,6 +495,8 @@ JOIN (
   -- approve pengajuan Inventaris & Maintenance dari SPV CRM sebelum
   -- diteruskan + Arsip
   UNION SELECT 'manajer_markom','event','lihat' UNION SELECT 'manajer_markom','event','tambah' UNION SELECT 'manajer_markom','event','kelola' UNION SELECT 'manajer_markom','event','approve' UNION SELECT 'manajer_markom','event','monitoring'
+  UNION SELECT 'manajer_markom','inventaris','lihat' UNION SELECT 'manajer_markom','inventaris','approve_atasan'
+  UNION SELECT 'manajer_markom','maintenance','lihat' UNION SELECT 'manajer_markom','maintenance','approve_atasan'
   UNION SELECT 'manajer_markom','pengajuan_unit','lihat' UNION SELECT 'manajer_markom','pengajuan_unit','approve'
   UNION SELECT 'manajer_markom','arsip','lihat' UNION SELECT 'manajer_markom','arsip','tambah'
   UNION SELECT 'manajer_markom','laporan','lihat'
@@ -482,6 +504,8 @@ JOIN (
   -- SPV CRM: pengelola & cek pengajuan Event + membuat pengajuan Inventaris
   -- & Maintenance (diapprove Manajer MARKOM) + Arsip
   UNION SELECT 'spv_crm','event','lihat' UNION SELECT 'spv_crm','event','verifikasi' UNION SELECT 'spv_crm','event','monitoring'
+  UNION SELECT 'spv_crm','inventaris','lihat' UNION SELECT 'spv_crm','inventaris','ajukan'
+  UNION SELECT 'spv_crm','maintenance','lihat' UNION SELECT 'spv_crm','maintenance','ajukan'
   UNION SELECT 'spv_crm','pengajuan_unit','lihat' UNION SELECT 'spv_crm','pengajuan_unit','ajukan'
   UNION SELECT 'spv_crm','arsip','lihat' UNION SELECT 'spv_crm','arsip','tambah'
 
@@ -491,20 +515,30 @@ JOIN (
   -- Manajer QMS: pengelola utama Arsip Digital + approve pengajuan
   -- Inventaris & Maintenance dari Staff QMS sebelum diteruskan
   UNION SELECT 'manajer_qms','arsip','lihat' UNION SELECT 'manajer_qms','arsip','kelola' UNION SELECT 'manajer_qms','arsip','monitoring'
+  UNION SELECT 'manajer_qms','inventaris','lihat' UNION SELECT 'manajer_qms','inventaris','approve_atasan'
+  UNION SELECT 'manajer_qms','maintenance','lihat' UNION SELECT 'manajer_qms','maintenance','approve_atasan'
   UNION SELECT 'manajer_qms','pengajuan_unit','lihat' UNION SELECT 'manajer_qms','pengajuan_unit','approve'
   UNION SELECT 'manajer_qms','laporan','lihat' UNION SELECT 'manajer_qms','laporan','kelola'
 
   -- Staff QMS: pengelola Arsip Digital + membuat pengajuan Inventaris &
   -- Maintenance (diapprove Manajer QMS)
   UNION SELECT 'staff_qms','arsip','lihat' UNION SELECT 'staff_qms','arsip','tambah' UNION SELECT 'staff_qms','arsip','kelola'
+  UNION SELECT 'staff_qms','inventaris','lihat' UNION SELECT 'staff_qms','inventaris','ajukan'
+  UNION SELECT 'staff_qms','maintenance','lihat' UNION SELECT 'staff_qms','maintenance','ajukan'
   UNION SELECT 'staff_qms','pengajuan_unit','lihat' UNION SELECT 'staff_qms','pengajuan_unit','ajukan'
 
   -- TU: membuat pengajuan Inventaris/Maintenance/EMS untuk unit pendidikan
   -- (diapprove Kepala Sekolah) + Arsip
+  UNION SELECT 'tu','inventaris','lihat' UNION SELECT 'tu','inventaris','ajukan'
+  UNION SELECT 'tu','maintenance','lihat' UNION SELECT 'tu','maintenance','ajukan'
+  UNION SELECT 'tu','event','lihat' UNION SELECT 'tu','event','ajukan'
   UNION SELECT 'tu','pengajuan_unit','lihat' UNION SELECT 'tu','pengajuan_unit','ajukan'
   UNION SELECT 'tu','arsip','lihat' UNION SELECT 'tu','arsip','tambah'
 
   -- Kepala Sekolah: validasi/approve pengajuan dari TU + Arsip
+  UNION SELECT 'kepala_sekolah','inventaris','lihat' UNION SELECT 'kepala_sekolah','inventaris','approve_atasan'
+  UNION SELECT 'kepala_sekolah','maintenance','lihat' UNION SELECT 'kepala_sekolah','maintenance','approve_atasan'
+  UNION SELECT 'kepala_sekolah','event','lihat' UNION SELECT 'kepala_sekolah','event','approve_atasan'
   UNION SELECT 'kepala_sekolah','pengajuan_unit','lihat' UNION SELECT 'kepala_sekolah','pengajuan_unit','approve'
   UNION SELECT 'kepala_sekolah','arsip','lihat' UNION SELECT 'kepala_sekolah','arsip','tambah'
   UNION SELECT 'kepala_sekolah','laporan','lihat'

@@ -84,6 +84,7 @@ $demoRoles = [
 <!-- Bootstrap 5 (framework CSS utama aplikasi) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -190,8 +191,6 @@ html,body{height:100%;font-family:var(--font-body);background:var(--bg);color:va
   <div class="rgt">
     <div class="login-card">
       <div class="fwelcome"><h2>Masuk ke akun Anda</h2><p>Gunakan kredensial yang diberikan oleh Administrator.</p></div>
-      <?php if ($error): ?><div class="falert ferr"><i data-lucide="alert-triangle"></i><span><?= htmlspecialchars($error) ?></span></div><?php endif; ?>
-      <?php if (isset($_GET['registered'])): ?><div class="falert fok"><i data-lucide="check-circle"></i><span>Registrasi berhasil! Silakan login.</span></div><?php endif; ?>
       <form method="POST">
         <?= csrf_field() ?>
         <div class="fgrp">
@@ -234,6 +233,13 @@ eye.addEventListener('click',()=>{
   eye.innerHTML = type === 'password' ? '<i data-lucide="eye"></i>' : '<i data-lucide="eye-off"></i>';
   lucide.createIcons({ root: eye });
 });
+
+<?php if ($error): ?>
+Swal.fire({ title: 'Terjadi Kesalahan!', text: <?= json_encode($error) ?>, icon: 'error', confirmButtonText: 'OK', confirmButtonColor: '#145c3f' });
+<?php endif; ?>
+<?php if (isset($_GET['registered'])): ?>
+Swal.fire({ title: 'Berhasil!', text: 'Registrasi berhasil! Silakan login.', icon: 'success', confirmButtonText: 'OK', confirmButtonColor: '#145c3f' });
+<?php endif; ?>
 </script>
 </body>
 </html>

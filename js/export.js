@@ -48,40 +48,61 @@ function printTable(tableId, judul) {
 }
 
 /* ───────────────────────── EKSPOR EXCEL (.xlsx) ───────────────────────── */
+let _xlsxPromise = null;
 function _ensureSheetJS(cb) {
     if (window.XLSX) return cb();
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-    s.onload = cb;
-    s.onerror = () => toast('Gagal memuat pustaka Excel. Periksa koneksi internet.', 'error');
-    document.head.appendChild(s);
+    if (!_xlsxPromise) {
+        _xlsxPromise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+            s.onload = resolve;
+            s.onerror = () => { _xlsxPromise = null; reject(new Error('Gagal memuat pustaka Excel. Periksa koneksi internet.')); };
+            document.head.appendChild(s);
+        });
+    }
+    _xlsxPromise.then(cb).catch(e => toast(e.message, 'error'));
 }
 function exportExcel(tableId, filename) {
     const table = document.getElementById(tableId);
     if (!table) { toast('Tabel tidak ditemukan untuk diekspor.', 'error'); return; }
     _ensureSheetJS(() => {
         try {
-            const wb = XLSX.utils.table_to_book(table, { raw: false });
+            const clone = table.cloneNode(true);
+            clone.style.position = 'absolute';
+            clone.style.left = '-9999px';
+            clone.style.display = 'table';
+            clone.classList.remove('d-none');
+            clone.querySelectorAll('.actions-cell, .no-print').forEach(el => el.remove());
+            document.body.appendChild(clone);
+            
+            const wb = XLSX.utils.table_to_book(clone, { raw: false });
             XLSX.writeFile(wb, (filename || tableId) + '.xlsx');
+            clone.remove();
             toast('Data berhasil diekspor ke Excel.', 'success');
         } catch (e) { toast('Gagal mengekspor Excel: ' + e.message, 'error'); }
     });
 }
 
 /* ───────────────────────── EKSPOR PDF ───────────────────────── */
+let _pdfPromise = null;
 function _ensureJsPDF(cb) {
     if (window.jspdf && window.jspdf.jsPDF) return cb();
-    const s1 = document.createElement('script');
-    s1.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
-    s1.onload = () => {
-        const s2 = document.createElement('script');
-        s2.src = 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js';
-        s2.onload = cb;
-        s2.onerror = () => toast('Gagal memuat pustaka PDF. Periksa koneksi internet.', 'error');
-        document.head.appendChild(s2);
-    };
-    s1.onerror = () => toast('Gagal memuat pustaka PDF. Periksa koneksi internet.', 'error');
-    document.head.appendChild(s1);
+    if (!_pdfPromise) {
+        _pdfPromise = new Promise((resolve, reject) => {
+            const s1 = document.createElement('script');
+            s1.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+            s1.onload = () => {
+                const s2 = document.createElement('script');
+                s2.src = 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js';
+                s2.onload = resolve;
+                s2.onerror = () => { _pdfPromise = null; reject(new Error('Gagal memuat pustaka PDF (autotable).')); };
+                document.head.appendChild(s2);
+            };
+            s1.onerror = () => { _pdfPromise = null; reject(new Error('Gagal memuat pustaka PDF.')); };
+            document.head.appendChild(s1);
+        });
+    }
+    _pdfPromise.then(cb).catch(e => toast(e.message, 'error'));
 }
 function exportPDF(tableId, filename, judul) {
     const table = document.getElementById(tableId);
@@ -90,6 +111,11 @@ function exportPDF(tableId, filename, judul) {
     const meta = _exportMeta();
     _ensureJsPDF(() => {
         try {
+            const clone = table.cloneNode(true);
+            clone.style.display = 'table';
+            clone.classList.remove('d-none');
+            clone.querySelectorAll('.actions-cell, .no-print').forEach(el => el.remove());
+            
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ orientation: 'landscape' });
             doc.setFontSize(13);
@@ -99,7 +125,7 @@ function exportPDF(tableId, filename, judul) {
             doc.setTextColor(90, 90, 90);
             doc.text(title + ' — dicetak ' + meta.dateStr, 14, 20);
             doc.autoTable({
-                html: '#' + tableId,
+                html: clone,
                 startY: 26,
                 styles: { fontSize: 8, cellPadding: 2.5 },
                 headStyles: { fillColor: [20, 92, 63], textColor: 255 },

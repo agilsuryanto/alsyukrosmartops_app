@@ -158,26 +158,26 @@ async function simpanKaryawan() {
         jabatan: document.getElementById('kJabatan').value, divisi_id: document.getElementById('kDivisi').value,
         atasan_id: document.getElementById('kAtasan').value,
     });
-    if (r.ok) { toast('Data karyawan tersimpan.', 'success'); location.reload(); } else toast(r.msg, 'error');
+    if (r.ok) { toast('Data karyawan tersimpan.', 'success'); location.reload(); } else showModalError('modalKaryawan', r.msg);
 }
 async function simpanKegiatan() {
     const r = await apiFetch('karyawan', 'assign_kegiatan', {
         karyawan_id: document.getElementById('gKaryawan').value, jenis: document.getElementById('gJenis').value,
         tanggal: document.getElementById('gTanggal').value, deskripsi: document.getElementById('gDeskripsi').value,
     });
-    if (r.ok) { toast('Kegiatan diberikan.', 'success'); closeModal('modalKegiatan'); loadKegiatan(); } else toast(r.msg, 'error');
+    if (r.ok) { toast('Kegiatan diberikan.', 'success'); closeModal('modalKegiatan'); loadKegiatan(); } else showModalError('modalKegiatan', r.msg);
 }
 function bukaHasil(id) { document.getElementById('hId').value = id; document.getElementById('hHasil').value = ''; openModal('modalHasil'); }
 async function simpanHasil() {
     const r = await apiFetch('karyawan', 'input_hasil', { id: document.getElementById('hId').value, hasil_laporan: document.getElementById('hHasil').value });
-    if (r.ok) { toast('Hasil kegiatan terkirim.', 'success'); closeModal('modalHasil'); loadKegiatan(); } else toast(r.msg, 'error');
+    if (r.ok) { toast('Hasil kegiatan terkirim.', 'success'); closeModal('modalHasil'); loadKegiatan(); } else showModalError('modalHasil', r.msg);
 }
 async function simpanNilai() {
     const r = await apiFetch('karyawan', 'nilai_kinerja', {
         karyawan_id: document.getElementById('nKaryawan').value, periode: document.getElementById('nPeriode').value,
         nilai: document.getElementById('nNilai').value, catatan: document.getElementById('nCatatan').value,
     });
-    if (r.ok) { toast('Penilaian tersimpan.', 'success'); closeModal('modalNilai'); loadPenilaian(); } else toast(r.msg, 'error');
+    if (r.ok) { toast('Penilaian tersimpan.', 'success'); closeModal('modalNilai'); loadPenilaian(); } else showModalError('modalNilai', r.msg);
 }
 const kStatusBadge = { ditugaskan: 'b-gray', dikerjakan: 'b-blue', selesai: 'b-green' };
 const kStatusLabel = { ditugaskan: 'Ditugaskan', dikerjakan: 'Dikerjakan', selesai: 'Selesai' };
@@ -186,19 +186,20 @@ async function loadKegiatan() {
     if (!r.ok) return;
     document.getElementById('statKegiatanAktif').textContent = r.data.filter(k => k.status !== 'selesai').length;
     const isPelaksana = <?= $isPelaksana ? 'true' : 'false' ?>;
-    document.getElementById('kegiatanBody').innerHTML = r.data.length ? r.data.map(k => `<tr><td>${k.karyawan_nama}</td><td>${k.jenis}</td><td>${k.deskripsi}</td><td>${k.tanggal}</td>
+    if (document.getElementById('kegiatanBody')) updateDOM('kegiatanBody', r.data.length ? r.data.map(k => `<tr><td>${k.karyawan_nama}</td><td>${k.jenis}</td><td>${k.deskripsi}</td><td>${k.tanggal}</td>
         <td><span class="badge ${kStatusBadge[k.status]}">${kStatusLabel[k.status]}</span></td><td>${k.hasil_laporan||'-'}</td>
         ${isPelaksana ? `<td>${k.status!=='selesai' ? `<button class="btn btn-outline btn-sm" onclick="bukaHasil(${k.id})"><i data-lucide="send"></i> Input Hasil</button>` : '-'}</td>` : ''}
-        </tr>`).join('') : `<tr><td colspan="7" class="empty-row">Belum ada kegiatan.</td></tr>`;
-    lucide.createIcons();
+        </tr>`).join('') : `<tr><td colspan="7" class="empty-row">Belum ada kegiatan.</td></tr>`);
 }
 async function loadPenilaian() {
     const r = await apiFetch('karyawan', 'list_penilaian', {}, 'GET');
     if (!r.ok) return;
-    document.getElementById('penilaianBody').innerHTML = r.data.length ? r.data.map(p => `<tr><td>${p.karyawan_nama}</td><td>${p.periode}</td><td><b>${p.nilai}</b></td><td>${p.penilai_nama}</td><td>${p.catatan||'-'}</td></tr>`).join('')
-        : '<tr><td colspan="5" class="empty-row">Belum ada penilaian.</td></tr>';
+    if (document.getElementById('penilaianBody')) updateDOM('penilaianBody', r.data.length ? r.data.map(p => `<tr><td>${p.karyawan_nama}</td><td>${p.periode}</td><td><b>${p.nilai}</b></td><td>${p.penilai_nama}</td><td>${p.catatan||'-'}</td></tr>`).join('')
+        : '<tr><td colspan="5" class="empty-row">Belum ada penilaian.</td></tr>');
 }
 loadKegiatan();
+setInterval(loadKegiatan, 10000); // Polling real-time data
+setInterval(loadPenilaian, 10000);
 renderExportToolbar('#toolbarKaryawan', 'tblKaryawan', 'data_karyawan', 'Data Karyawan');
 renderExportToolbar('#toolbarKegiatan', 'tblKegiatan', 'kegiatan_karyawan', 'Kegiatan Karyawan');
 renderExportToolbar('#toolbarPenilaian', 'tblPenilaian', 'penilaian_kinerja', 'Penilaian Kinerja');

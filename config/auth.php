@@ -114,6 +114,79 @@ function getRoleAccessMatrix($role) {
     while ($row = $res->fetch_assoc()) {
         $matrix[$row['modul']][] = $row['aksi'];
     }
+    
+    // Berikan akses 'kelola' secara otomatis kepada spv_inventaris untuk mengedit barang
+    // Berikan akses 'kelola' & 'tambah' secara otomatis kepada spv_inventaris
+    if ($role === 'spv_inventaris') {
+        if (!isset($matrix['inventaris'])) $matrix['inventaris'] = [];
+        if (!in_array('kelola', $matrix['inventaris'])) $matrix['inventaris'][] = 'kelola';
+        if (!in_array('tambah', $matrix['inventaris'])) $matrix['inventaris'][] = 'tambah';
+    }
+    // Berikan akses 'tambah' kepada staff_inventaris agar bisa input barang baru sesuai dokumen
+    if ($role === 'staff_inventaris') {
+        if (!isset($matrix['inventaris'])) $matrix['inventaris'] = [];
+        if (!in_array('tambah', $matrix['inventaris'])) $matrix['inventaris'][] = 'tambah';
+    }
+    
+    // --- PENYESUAIAN HAK AKSES MANAGER (Bypass DB agar tidak butuh file tambahan) ---
+    $manager_perms = [
+        'manajer_ga' => [
+            'karyawan' => ['lihat', 'monitoring'],
+            'inventaris' => ['lihat', 'monitoring'],
+            'maintenance' => ['lihat', 'monitoring'],
+            'arsip' => ['lihat', 'tambah', 'kelola'],
+            'laporan' => ['lihat']
+        ],
+        'manajer_hrd' => [
+            'karyawan' => ['lihat', 'monitoring', 'kelola'],
+            'inventaris' => ['lihat', 'approve_atasan'],
+            'maintenance' => ['lihat', 'approve_atasan'],
+            'arsip' => ['lihat', 'tambah', 'kelola'],
+            'laporan' => ['lihat']
+        ],
+        'manajer_qms' => [
+            'arsip' => ['lihat', 'monitoring'],
+            'inventaris' => ['lihat', 'approve_atasan'],
+            'maintenance' => ['lihat', 'approve_atasan'],
+            'laporan' => ['lihat']
+        ],
+        'manajer_markom' => [
+            'event' => ['lihat', 'monitoring'],
+            'inventaris' => ['lihat', 'monitoring'],
+            'arsip' => ['lihat', 'tambah', 'kelola'],
+            'laporan' => ['lihat']
+        ]
+    ];
+
+    if (isset($manager_perms[$role])) {
+        foreach ($manager_perms[$role] as $mod => $aksiList) {
+            $matrix[$mod] = array_values(array_unique(array_merge($matrix[$mod] ?? [], $aksiList)));
+        }
+    }
+    
+    // Berikan hak akses 'approve_atasan' secara otomatis kepada atasan (SPV, Team Leader, Kepsek)
+    // agar mereka bisa melihat & menyetujui pengajuan bawahan mereka
+    $atasan_roles = ['spv_inventaris', 'spv_sapras', 'team_leader', 'spv_crm', 'kepala_sekolah'];
+    if (in_array($role, $atasan_roles)) {
+        foreach (['inventaris', 'maintenance', 'event'] as $mod) {
+            if (!isset($matrix[$mod])) $matrix[$mod] = [];
+            if (!in_array('lihat', $matrix[$mod])) $matrix[$mod][] = 'lihat';
+            if (!in_array('approve_atasan', $matrix[$mod])) $matrix[$mod][] = 'approve_atasan';
+        }
+    }
+    
+    // Pastikan SPV CRM tidak bisa membuat pengajuan
+    if ($role === 'spv_crm') {
+        foreach (['inventaris', 'maintenance', 'event'] as $mod) {
+            if (isset($matrix[$mod])) {
+                $matrix[$mod] = array_values(array_filter($matrix[$mod], function($a) {
+                    return $a !== 'ajukan';
+                }));
+            }
+        }
+    }
+    // ---------------------------------------------------------------------------------
+
     $cache[$role] = $matrix;
     return $matrix;
 }
@@ -142,7 +215,8 @@ function requireAccess($modul, $aksi) {
 /** Daftar modul yang BISA DILIHAT oleh sebuah role (untuk sidebar & dashboard). */
 function getRoleModules($role) {
     $matrix = getRoleAccessMatrix($role);
-    return array_keys($matrix);
+    $modules = array_keys($matrix);
+    return array_values(array_filter($modules, fn($m) => $m !== 'pengajuan_unit'));
 }
 
 /** Label modul untuk tampilan UI. */
@@ -154,7 +228,6 @@ function getModuleLabel($modul) {
         'maintenance'    => 'Maintenance Fasilitas',
         'arsip'          => 'Arsip Digital & Pelaporan Analitik',
         'laporan'        => 'Laporan & Monitoring',
-        'pengajuan_unit' => 'Pengajuan Lintas Divisi',
     ];
     return $labels[$modul] ?? ucfirst($modul);
 }
@@ -162,7 +235,6 @@ function getModuleIcon($modul) {
     $icons = [
         'inventaris' => 'package', 'karyawan' => 'users', 'event' => 'calendar',
         'maintenance' => 'wrench', 'arsip' => 'archive', 'laporan' => 'bar-chart-2',
-        'pengajuan_unit' => 'file-text',
     ];
     return $icons[$modul] ?? 'circle';
 }
@@ -170,7 +242,6 @@ function getModulePage($modul) {
     $pages = [
         'inventaris' => 'inventory', 'karyawan' => 'karyawan', 'event' => 'event',
         'maintenance' => 'maintenance', 'arsip' => 'arsip', 'laporan' => 'laporan',
-        'pengajuan_unit' => 'pengajuan_unit',
     ];
     return $pages[$modul] ?? $modul;
 }
@@ -203,38 +274,53 @@ function getRoleColor($role) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
- * JEMBATAN PENGAJUAN LINTAS DIVISI (modul `pengajuan_unit`)
- * Setiap divisi yang BUKAN pengelola langsung modul Inventaris/
- * Maintenance/EMS mengajukan kebutuhan lewat sini; atasan langsungnya
- * (approver_role) wajib approve SEBELUM pengajuan diteruskan ke
- * pengelola modul terkait — persis pola yang berulang di seluruh
- * dokumen rancangan hak akses (bukan cuma TU -> Kepala Sekolah).
+ * ATASAN UNIT (PENGGANTI JEMBATAN PENGAJUAN LINTAS DIVISI)
  * ═══════════════════════════════════════════════════════════════════ */
 
-/** Role atasan yang wajib approve pengajuan sebelum diteruskan. */
-function getPengajuanApproverRole($submitterRole) {
-    $map = [
-        'tu'               => 'kepala_sekolah',
-        'staff_hrd'        => 'manajer_hrd',
-        'staff_qms'        => 'manajer_qms',
-        'spv_crm'          => 'manajer_markom',
-        'team_leader'      => 'spv_sapras',
-        'staff_inventaris' => 'spv_inventaris',
-    ];
-    return $map[$submitterRole] ?? null;
-}
-
-/** Jenis kebutuhan (modul) yang boleh diajukan role tsb lewat jembatan ini. */
-function getPengajuanAllowedModules($submitterRole) {
-    $map = [
-        'tu'               => ['inventaris', 'maintenance', 'event'],
-        'staff_hrd'        => ['inventaris', 'maintenance', 'event'],
-        'staff_qms'        => ['inventaris', 'maintenance'],
-        'spv_crm'          => ['inventaris', 'maintenance'],
-        'team_leader'      => ['inventaris'],
-        'staff_inventaris' => ['maintenance'],
-    ];
-    return $map[$submitterRole] ?? [];
+/** Mendapatkan ID user yang menjadi Atasan Unit dari user yang diberikan. */
+function getAtasanId($userId) {
+    global $conn;
+    
+    // 1. Ambil data user beserta rolenya
+    $stmt = $conn->prepare("SELECT u.unit_id, r.kode as role_kode FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id=?");
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $user = $stmt->get_result()->fetch_assoc();
+    if (!$user) return null;
+    
+    // 2. Cek hierarki di tabel karyawan (khusus GA / karyawan umum)
+    $stmt2 = $conn->prepare("SELECT k2.user_id FROM karyawan k1 JOIN karyawan k2 ON k2.id = k1.atasan_id WHERE k1.user_id=? AND k2.user_id IS NOT NULL");
+    $stmt2->bind_param("i", $userId);
+    $stmt2->execute();
+    $karyawanAtasan = $stmt2->get_result()->fetch_assoc();
+    if ($karyawanAtasan && $karyawanAtasan['user_id']) {
+        return $karyawanAtasan['user_id'];
+    }
+    
+    // 3. Mapping Atasan berdasarkan Role & Unit (Lintas Divisi)
+    $role = $user['role_kode'];
+    $targetRole = null;
+    
+    if ($role === 'tu') $targetRole = 'kepala_sekolah';
+    else if ($role === 'staff_hrd') $targetRole = 'manajer_hrd';
+    else if ($role === 'staff_qms') $targetRole = 'manajer_qms';
+    else if ($role === 'staff_crm') $targetRole = 'spv_crm';
+    else if ($role === 'spv_crm') $targetRole = 'manajer_markom';
+    
+    if ($targetRole) {
+        if ($targetRole === 'kepala_sekolah') {
+            $stmt3 = $conn->prepare("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.kode=? AND u.unit_id=? AND u.status='aktif' LIMIT 1");
+            $stmt3->bind_param("si", $targetRole, $user['unit_id']);
+        } else {
+            $stmt3 = $conn->prepare("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.kode=? AND u.status='aktif' LIMIT 1");
+            $stmt3->bind_param("s", $targetRole);
+        }
+        $stmt3->execute();
+        $atasan = $stmt3->get_result()->fetch_assoc();
+        return $atasan ? $atasan['id'] : null;
+    }
+    
+    return null;
 }
 
 /** Semua daftar role (untuk form registrasi / kelola akun oleh admin). */

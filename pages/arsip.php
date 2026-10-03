@@ -77,11 +77,10 @@ const aksesBadge = { umum: 'b-green', terbatas: 'b-yellow', rahasia: 'b-red' };
 async function loadArsip() {
     const r = await apiFetch('arsip', 'list', {}, 'GET');
     if (!r.ok) return;
-    document.getElementById('arsipBody').innerHTML = r.data.length ? r.data.map(a => `<tr><td>${a.judul_dokumen}</td><td>${a.nama_kategori||'-'}</td>
+    if (document.getElementById('arsipBody')) updateDOM('arsipBody', r.data.length ? r.data.map(a => `<tr><td>${a.judul_dokumen}</td><td>${a.nama_kategori||'-'}</td>
         <td><span class="badge ${aksesBadge[a.tingkat_akses]}">${a.tingkat_akses}</span></td><td>${a.uploader_nama}</td><td>${a.tanggal_unggah}</td>
         ${A_KELOLA ? `<td><button class="btn btn-outline btn-sm" onclick="backupArsip(${a.id})"><i data-lucide="database-backup"></i> Backup</button></td>` : ''}
-        </tr>`).join('') : '<tr><td colspan="6" class="empty-row">Belum ada dokumen.</td></tr>';
-    lucide.createIcons();
+        </tr>`).join('') : '<tr><td colspan="6" class="empty-row">Belum ada dokumen.</td></tr>');
 }
 async function uploadArsip() {
     const fd = new FormData();
@@ -94,11 +93,11 @@ async function uploadArsip() {
     if (f) fd.append('file', f);
     const res = await fetch('api/arsip.php', { method: 'POST', body: fd });
     const r = await res.json();
-    if (r.ok) { toast('Dokumen berhasil diunggah.', 'success'); closeModal('modalUpload'); loadArsip(); } else toast(r.msg, 'error');
+    if (r.ok) { toast('Dokumen berhasil diunggah.', 'success'); closeModal('modalUpload'); loadArsip(); } else showModalError('modalUpload', r.msg);
 }
 async function simpanKategori() {
     const r = await apiFetch('arsip', 'tambah_kategori', { nama_kategori: document.getElementById('ktNama').value, deskripsi: document.getElementById('ktDeskripsi').value });
-    if (r.ok) { toast('Kategori tersimpan.', 'success'); location.reload(); } else toast(r.msg, 'error');
+    if (r.ok) { toast('Kategori tersimpan.', 'success'); location.reload(); } else showModalError('modalKategori', r.msg);
 }
 async function backupArsip(id) {
     const r = await apiFetch('arsip', 'backup', { arsip_id: id });
@@ -109,9 +108,11 @@ async function loadBackup() {
     if (!el) return;
     const r = await apiFetch('arsip', 'list_backup', {}, 'GET');
     if (!r.ok) return;
-    el.innerHTML = r.data.length ? r.data.map(b => `<tr><td>${b.judul_dokumen||'-'}</td><td>${b.tanggal_backup}</td><td>${b.lokasi_backup}</td></tr>`).join('') : '<tr><td colspan="3" class="empty-row">Belum ada riwayat backup.</td></tr>';
+    updateDOM('backupBody', r.data.length ? r.data.map(b => `<tr><td>${b.judul_dokumen||'-'}</td><td>${b.tanggal_backup}</td><td>${b.lokasi_backup}</td></tr>`).join('') : '<tr><td colspan="3" class="empty-row">Belum ada riwayat backup.</td></tr>');
 }
 loadArsip(); loadBackup();
+setInterval(loadArsip, 10000); // Polling real-time data
+setInterval(loadBackup, 10000);
 renderExportToolbar('#toolbarArsip', 'tblArsip', 'arsip_digital', 'Arsip Digital');
 renderExportToolbar('#toolbarBackup', 'tblBackup', 'riwayat_backup', 'Riwayat Backup Arsip');
 </script>
