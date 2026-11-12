@@ -9,7 +9,7 @@ function renderSidebar($currentPage = '') {
     $modules = getRoleModules($user['role']);
 
     // Urutan tampil menu sesuai urutan modul pada dokumen (Bab 2.1 Model 1)
-    $order = ['inventaris', 'karyawan', 'event', 'maintenance', 'arsip', 'laporan'];
+    $order = ['inventaris', 'karyawan', 'event', 'maintenance', 'arsip', 'laporan', 'log_aktivitas'];
     usort($modules, fn($a, $b) => array_search($a, $order) <=> array_search($b, $order));
     ?>
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
@@ -48,6 +48,7 @@ function renderSidebar($currentPage = '') {
                     <span><?= htmlspecialchars($user['nama_role']) ?></span>
                 </div>
             </div>
+            <a href="#" class="logout-btn" onclick="openModal('modalGantiPassword'); return false;" style="margin-bottom: 5px;"><i data-lucide="key"></i> Ganti Password</a>
             <a href="#" class="logout-btn" onclick="customConfirm('Apakah Anda yakin ingin keluar dari sistem?', 'Iya, Keluar', 'btn-danger', '<i data-lucide=\'log-out\' style=\'width:56px;height:56px;color:var(--danger)\'></i>').then(res => { if(res) window.location.href='logout.php'; }); return false;"><i data-lucide="log-out"></i> Keluar</a>
         </div>
     </aside>

@@ -1,4 +1,6 @@
 <?php
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 require_once 'config/auth.php';
 if (isLoggedIn()) { header('Location: dashboard.php'); exit(); }
 $error = '';
@@ -6,42 +8,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_valid_form()) {
         $error = 'Sesi form kedaluwarsa, silakan coba lagi.';
     } else {
-        $username = trim($_POST['username'] ?? '');
-        $password = $_POST['password'] ?? '';
-        if (empty($username) || empty($password)) { $error = 'Username dan password wajib diisi.'; }
-        else {
-            global $conn;
-            $found = null;
-            $stmt = $conn->prepare("SELECT u.*, r.kode AS role_kode, r.nama_role FROM users u
-                                     JOIN roles r ON r.id = u.role_id
-                                     WHERE u.username=? OR u.email=?");
-            $stmt->bind_param("ss", $username, $username);
-            $stmt->execute();
-            $candidate = $stmt->get_result()->fetch_assoc();
+        if (checkIpRateLimit()) {
+            $error = 'Terlalu banyak percobaan. Silakan coba lagi nanti.';
+        } else {
+            $username = trim($_POST['username'] ?? '');
+            $password = $_POST['password'] ?? '';
+            if (empty($username) || empty($password)) { $error = 'Username dan password wajib diisi.'; }
+            else {
+                global $conn;
+                $found = null;
+                $stmt = $conn->prepare("SELECT u.*, r.kode AS role_kode, r.nama_role FROM users u
+                                         JOIN roles r ON r.id = u.role_id
+                                         WHERE u.username=? OR u.email=?");
+                $stmt->bind_param("ss", $username, $username);
+                $stmt->execute();
+                $candidate = $stmt->get_result()->fetch_assoc();
 
-            if ($candidate && $candidate['status'] !== 'aktif') {
-                $error = 'Akun tidak aktif. Hubungi Administrator.';
-            } elseif ($candidate && isAccountLocked($candidate)) {
-                $sisa = ceil((strtotime($candidate['locked_until']) - time()) / 60);
-                $error = "Akun terkunci sementara karena terlalu banyak percobaan gagal. Coba lagi dalam $sisa menit.";
-            } elseif ($candidate && password_verify($password, $candidate['password'])) {
-                $found = $candidate;
-            }
+                $hash = $candidate ? $candidate['password'] : '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
+                $isValid = password_verify($password, $hash);
 
-            if ($found) {
-                resetFailedLogin($found['id']);
-                session_regenerate_id(true);
-                $_SESSION['user_id'] = $found['id'];
-                logAktivitas($found['id'], 'auth', 'Login ke sistem');
-                header('Location: dashboard.php'); exit();
-            } elseif (!$error) {
-                if ($candidate) {
-                    $attempts = registerFailedLogin($candidate['id']);
-                    $sisa = LOGIN_MAX_ATTEMPTS - $attempts;
-                    $error = $sisa > 0
-                        ? "Username atau password salah. Sisa percobaan: $sisa."
-                        : "Akun terkunci " . LOGIN_LOCKOUT_MINUTES . " menit karena terlalu banyak percobaan gagal.";
-                } else {
+                if ($candidate && $isValid) {
+                    if ($candidate['status'] !== 'aktif') {
+                        $error = 'Akun tidak aktif. Hubungi Administrator.';
+                    } elseif (isAccountLocked($candidate)) {
+                        $error = "Username atau password salah.";
+                    } else {
+                        $found = $candidate;
+                    }
+                }
+
+                if ($found) {
+                    session_regenerate_id(true);
+                    $newSid = session_id();
+                    if (!claimUserSession($found['id'], $newSid, getClientIp(), $_SERVER['HTTP_USER_AGENT'] ?? '')) {
+                        $error = 'Gagal memproses sesi login. Silakan coba lagi.';
+                    } else {
+                        resetFailedLogin($found['id']);
+                        $_SESSION['user_id'] = $found['id'];
+                        $_SESSION['last_activity'] = time();
+                        $_SESSION['db_last_touch'] = time();
+                        logAktivitas($found['id'], 'auth', 'Login ke sistem');
+                        header('Location: dashboard.php'); exit();
+                    }
+                } elseif (!$error) {
+                    if ($candidate) {
+                        registerFailedLogin($candidate['id']);
+                    }
+                    registerIpFailedLogin();
                     $error = 'Username atau password salah.';
                 }
             }
@@ -68,7 +81,8 @@ $demoRoles = [
     ['u' => 'staffqms', 'label' => 'Staff QMS', 'icon' => 'folder'],
     ['u' => 'tu_sd', 'label' => 'TU (SD)', 'icon' => 'file-text'],
     ['u' => 'kepsek_sd', 'label' => 'Kepala Sekolah (SD)', 'icon' => 'graduation-cap'],
-    ['u' => 'pengguna1', 'label' => 'Pengguna Unit', 'icon' => 'user'],
+    ['u' => 'manajerfa', 'label' => 'Manajer FA', 'icon' => 'briefcase'],
+    ['u' => 'stafffa', 'label' => 'Staff FA', 'icon' => 'wallet'],
 ];
 ?>
 <!DOCTYPE html>
@@ -82,142 +96,372 @@ $demoRoles = [
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <!-- Bootstrap 5 (framework CSS utama aplikasi) -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-<script src="https://unpkg.com/lucide@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<link rel="stylesheet" href="assets/vendor/bootstrap.min.css">
+<script src="assets/vendor/lucide.min.js"></script>
+<script src="assets/vendor/sweetalert2.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bs-primary:#145c3f; --bs-primary-rgb:20,92,63;
-  --bs-success:#145c3f; --bs-success-rgb:20,92,63;
-  --primary:#145c3f; --primary-dark:#0c3f2b; --primary-tint:#e7f1ec;
-  --gold:#c79a3f; --gold-deep:#a97c22; --gold-tint:#f6ecd6;
-  --bg:#f6f4ee; --card:#fffefb; --text:#1c2a22; --muted:#6f7669; --border:#e6e1d3;
-  --font-display:'Fraunces',ui-serif,Georgia,serif; --font-body:'Inter',ui-sans-serif,sans-serif;
+  --primary: #0a4d33;
+  --primary-hover: #073a26;
+  --bg-color: #f0f7f4;
+  --text-main: #2d3748;
+  --text-muted: #718096;
+  --border-color: #e2e8f0;
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Inter', sans-serif;
 }
-html,body{height:100%;font-family:var(--font-body);background:var(--bg);color:var(--text)}
-.wrap{display:flex;min-height:100vh}
-
-/* — Panel kiri: identitas institusi dengan motif geometris bintang delapan (khas ornamen Islam) — */
-.lft{
-  width:46%;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;
-  padding:52px 56px;color:#f3f6f3;
-  background:
-    radial-gradient(90% 70% at 85% -10%, rgba(199,154,63,.16) 0%, transparent 55%),
-    linear-gradient(200deg,#123d2c 0%,#0a2e21 100%);
+html,body{height:100%;font-family:var(--font-body);background:var(--bg-color);color:var(--text-main)}
+.page-wrapper {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
 }
-.motif{position:absolute;inset:0;opacity:.12;pointer-events:none}
-.lft-top{position:relative;z-index:1}
-.logo-badge-lg{display:inline-flex;align-items:center;gap:13px;background:#fffefb;padding:11px 18px 11px 11px;border-radius:14px;box-shadow:0 10px 26px rgba(0,0,0,.22)}
-.logo-badge-lg img{height:46px;width:auto;display:block}
-.logo-badge-lg .lb-text strong{display:block;font-family:var(--font-display);font-size:13px;color:var(--primary-dark);font-weight:600;line-height:1.25}
-.logo-badge-lg .lb-text span{font-size:10.5px;color:#5c6f63}
-.lft-mid{position:relative;z-index:1;max-width:430px}
-.eyebrow-line{display:flex;align-items:center;gap:10px;margin:38px 0 16px;color:#c9a35c;font-size:12px;letter-spacing:.4px}
-.eyebrow-line::before{content:'';width:26px;height:1px;background:#c9a35c}
-.headline{font-family:var(--font-display);font-size:40px;font-weight:600;line-height:1.18;letter-spacing:.2px;margin-bottom:16px}
-.sub-txt{font-size:14.5px;line-height:1.7;color:#cfe0d5;max-width:400px}
-.lft-bottom{position:relative;z-index:1;display:flex;gap:0;border-top:1px solid rgba(255,255,255,.14);padding-top:20px}
-.lft-bottom div{flex:1;padding-right:14px}
-.lft-bottom strong{display:block;font-family:var(--font-display);font-size:20px;font-weight:600;color:#fff}
-.lft-bottom span{font-size:11px;color:#9fb8a8}
+/* Abstract leaf decorations for background corners */
+.bg-decor {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M0,50 C0,0 50,0 50,0 C100,0 100,50 100,50 C100,100 50,100 50,100 C0,100 0,50 0,50 Z" fill="%23dcece5" opacity="0.8"/><path d="M20,70 C20,20 70,20 70,20 C120,20 120,70 120,70 C120,120 70,120 70,120 C20,120 20,70 20,70 Z" fill="%23cbe0d5" opacity="0.8"/></svg>');
+  background-size: contain;
+  background-repeat: no-repeat;
+  z-index: 1;
+}
+.bg-decor-1 { top: -100px; left: -100px; transform: rotate(-30deg); }
+.bg-decor-2 { bottom: -100px; right: -100px; transform: rotate(150deg); }
 
-/* — Panel kanan: form — */
-.rgt{flex:1;display:flex;align-items:center;justify-content:center;padding:32px;background:var(--bg)}
-.login-card{background:var(--card);width:100%;max-width:440px;padding:42px 40px;border-radius:20px;border:1px solid var(--border);box-shadow:0 18px 40px rgba(20,30,23,.07)}
-.fwelcome{margin-bottom:26px}
-.fwelcome h2{font-family:var(--font-display);font-size:25px;font-weight:600;letter-spacing:.1px;margin-bottom:7px}
-.fwelcome p{color:var(--muted);font-size:13.5px}
-.falert{padding:12px 14px;border-radius:10px;font-size:13px;font-weight:500;display:flex;align-items:center;gap:10px;margin-bottom:20px}
-.falert svg{width:18px;height:18px;flex-shrink:0}
-.ferr{background:#f8e6e2;color:#8f2c20;border:1px solid #edc9c1}
-.fok{background:var(--primary-tint);color:var(--primary-dark);border:1px solid #cfe3d8}
-.fgrp{margin-bottom:16px}
-.flabel{display:block;font-size:12.5px;font-weight:600;margin-bottom:7px;color:#3c463e}
-.finwrap{position:relative}
-.finput{width:100%;padding:12px 15px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;background:#fbfaf6;outline:none;transition:all .2s;color:var(--text)}
-.finput:focus{border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px var(--primary-tint)}
-.feye{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted)}
-.btn-submit{width:100%;padding:13px;margin-top:6px;background:var(--primary);color:#fff;border:none;border-radius:10px;font-size:14.5px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .2s}
-.btn-submit:hover{background:var(--primary-dark)}
-.divider{display:flex;align-items:center;text-align:center;margin:24px 0;color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.2px}
-.divider::before,.divider::after{content:'';flex:1;border-bottom:1px solid var(--border)}
-.divider::before{margin-right:10px}.divider::after{margin-left:10px}
-.dbox{background:#fbfaf6;border:1px dashed var(--border);border-radius:12px;padding:14px;max-height:210px;overflow-y:auto}
-.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.dpill{padding:9px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;cursor:pointer;text-align:left;transition:all .15s;font-family:inherit}
-.dpill:hover{border-color:var(--gold-deep);box-shadow:0 2px 8px rgba(0,0,0,.05)}
-.dpill strong{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text)}
-.dpill strong svg{width:14px;height:14px;color:var(--primary)}
-.dpill span{font-size:11px;color:var(--muted)}
-.reglink{text-align:center;font-size:12.5px;color:var(--muted);margin-top:22px}
-.reglink b{color:var(--text)}
-@media(max-width:900px){.wrap{flex-direction:column}.lft{width:100%;padding:36px 24px}.rgt{width:100%;padding:20px}.login-card{padding:30px 24px}.headline{font-size:32px}}
-@media(max-width:480px){.lft{padding:26px 18px}.lft-bottom{flex-wrap:wrap;gap:14px}.lft-bottom div{flex:1 1 40%;padding-right:0}.headline{font-size:26px}.eyebrow-line{margin:26px 0 12px}.login-card{padding:24px 18px;border-radius:16px}.dgrid{grid-template-columns:1fr}.rgt{padding:14px}}
+.login-container {
+  display: flex;
+  width: 100%;
+  max-width: 1000px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(10, 77, 51, 0.08), 0 1px 3px rgba(0,0,0,0.05);
+  overflow: hidden;
+  position: relative;
+  z-index: 10;
+}
+.panel-left {
+  width: 45%;
+  background-color: var(--primary);
+  background-image: linear-gradient(rgba(10, 77, 51, 0.85), rgba(10, 77, 51, 0.95)), url('bg-building.png');
+  background-size: cover;
+  background-position: 25% center;
+  padding: 50px;
+  display: flex;
+  flex-direction: column;
+  color: #ffffff;
+}
+.panel-left-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.logo-area img {
+  height: 50px;
+  width: auto;
+}
+.logo-text {
+  font-family: var(--font-body);
+}
+.logo-text h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.2;
+}
+.logo-text span {
+  font-size: 14px;
+  font-weight: 400;
+  color: #e2e8f0;
+}
+.logo-divider {
+  width: 30px;
+  height: 1px;
+  background-color: rgba(255, 255, 255, 0.4);
+  margin: 30px 0;
+}
+.brand-text h3 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #e2e8f0;
+}
+.brand-text h1 {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  margin: 0;
+}
+.panel-left-bottom {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255,255,255,0.2);
+  padding-top: 24px;
+}
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #e2e8f0;
+}
+.feature-item i { width: 18px; height: 18px; }
+
+/* Right Panel */
+.panel-right {
+  width: 55%;
+  padding: 50px 60px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.form-header { margin-bottom: 30px; }
+.form-header h2 {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+.form-header p {
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+.input-group {
+  position: relative;
+  margin-bottom: 16px;
+}
+.input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--primary);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.input-control {
+  width: 100%;
+  padding: 12px 16px 12px 42px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-family: var(--font-body);
+  transition: all 0.2s;
+  color: var(--text-main);
+  background: #ffffff;
+}
+.input-control:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 77, 51, 0.1);
+}
+.pwd-toggle {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+.pwd-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.pwd-options input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+.pwd-options label { font-size: 13px; color: var(--text-muted); cursor: pointer; user-select: none; }
+
+.btn-login {
+  width: 100%;
+  padding: 12px;
+  background-color: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-login:hover { background-color: var(--primary-hover); }
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 28px 0;
+  color: #a0aec0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.divider::before, .divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border-color);
+}
+.divider::before { margin-right: 12px; }
+.divider::after { margin-left: 12px; }
+
+.demo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.demo-grid::-webkit-scrollbar { width: 5px; }
+.demo-grid::-webkit-scrollbar-track { background: transparent; }
+.demo-grid::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+.demo-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #f8faf9;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+}
+.demo-card:hover {
+  border-color: var(--primary);
+  background: #f0f7f4;
+}
+.demo-card i { color: var(--primary); width: 18px; height: 18px; }
+.demo-card-info { display: flex; flex-direction: column; }
+.demo-card-info strong { font-size: 12.5px; font-weight: 600; color: var(--text-main); }
+.demo-card-info span { font-size: 11px; color: var(--text-muted); }
+
+.help-text {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 30px;
+}
+.help-text b { color: var(--text-main); font-weight: 600; }
+
+@media(max-width: 900px) {
+  .login-container { flex-direction: column; max-width: 500px; margin: 20px; }
+  .panel-left { width: 100%; padding: 40px; min-height: 250px; }
+  .panel-right { width: 100%; padding: 40px; }
+  .panel-left-bottom { display: none; }
+}
+@media(max-width: 480px) {
+  .login-container { margin: 16px; }
+  .panel-left { padding: 35px 24px; min-height: auto; }
+  .panel-right { padding: 35px 24px; }
+  .logo-area img { height: 38px; }
+  .logo-text h3 { font-size: 14px; }
+  .logo-text span { font-size: 12px; }
+  .logo-divider { margin: 20px 0; }
+  .brand-text h3 { font-size: 14px; margin-bottom: 4px; }
+  .brand-text h1 { font-size: 25px; }
+  .form-header { margin-bottom: 24px; }
+  .form-header h2 { font-size: 22px; }
+  .demo-grid { grid-template-columns: 1fr; }
+}
+@media(min-width: 901px) {
+  html, body, .page-wrapper { overflow: hidden; height: 100vh; }
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="lft">
-    <svg class="motif" viewBox="0 0 500 800" preserveAspectRatio="xMidYMid slice">
-      <defs><g id="star8">
-        <path d="M0,-26 L7,-7 L26,0 L7,7 L0,26 L-7,7 L-26,0 L-7,-7 Z" fill="none" stroke="#c9a35c" stroke-width="1"/>
-      </g></defs>
-      <use href="#star8" x="60" y="90" transform="scale(1.4)" transform-origin="60 90"/>
-      <use href="#star8" x="430" y="60" transform="scale(1.1)" transform-origin="430 60"/>
-      <use href="#star8" x="360" y="260" transform="scale(2.1)" transform-origin="360 260"/>
-      <use href="#star8" x="60" y="420" transform="scale(1.6)" transform-origin="60 420"/>
-      <use href="#star8" x="440" y="520" transform="scale(1.3)" transform-origin="440 520"/>
-      <use href="#star8" x="150" y="650" transform="scale(1.8)" transform-origin="150 650"/>
-      <use href="#star8" x="420" y="740" transform="scale(1.2)" transform-origin="420 740"/>
-    </svg>
-    <div class="lft-top">
-      <div class="logo-badge-lg">
-        <img src="logo-full.png" alt="Logo Perguruan Islam Al Syukro Universal">
-        <div class="lb-text"><strong>Perguruan Islam<br>Al Syukro Universal</strong><span>Tangerang Selatan</span></div>
-      </div>
-    </div>
-    <div class="lft-mid">
-      <div class="eyebrow-line">Sistem Operasional Terpadu</div>
-      <h1 class="headline">Satu ruang kerja untuk seluruh operasional yayasan.</h1>
-      <p class="sub-txt">Al-SyukroSmart Ops menyatukan inventaris, kepegawaian, kegiatan, fasilitas, dan arsip — dengan alur persetujuan dan hak akses yang mengikuti struktur organisasi Anda.</p>
-    </div>
-    <div class="lft-bottom">
-      <div><strong>5</strong><span>Modul Terintegrasi</span></div>
-      <div><strong>17</strong><span>Peran Organisasi</span></div>
-      <div><strong>4</strong><span>Unit Pendidikan</span></div>
-    </div>
-  </div>
-  <div class="rgt">
-    <div class="login-card">
-      <div class="fwelcome"><h2>Masuk ke akun Anda</h2><p>Gunakan kredensial yang diberikan oleh Administrator.</p></div>
-      <form method="POST">
-        <?= csrf_field() ?>
-        <div class="fgrp">
-          <label class="flabel">Username atau Email</label>
-          <div class="finwrap"><input class="finput form-control" type="text" name="username" id="username" value="<?= htmlspecialchars($_POST['username'] ?? '') ?>" placeholder="Masukkan username..." required autofocus></div>
-        </div>
-        <div class="fgrp">
-          <label class="flabel">Password</label>
-          <div class="finwrap">
-            <input class="finput form-control" type="password" name="password" id="pw" placeholder="Masukkan password..." required>
-            <button type="button" class="feye" id="eyeBtn"><i data-lucide="eye"></i></button>
+<div class="page-wrapper">
+  <div class="bg-decor bg-decor-1"></div>
+  <div class="bg-decor bg-decor-2"></div>
+  
+  <div class="login-container">
+    <div class="panel-left">
+      <div class="panel-left-center">
+        <div class="logo-area">
+          <img src="logo-login.png" alt="Logo">
+          <div class="logo-text">
+            <h3>Perguruan Islam</h3>
+            <span>Al Syukro Universal</span>
           </div>
         </div>
-        <button type="submit" class="btn-submit btn btn-success w-100">Masuk</button>
-      </form>
-      <div class="divider">MODE DEMO — PASSWORD: PASSWORD123</div>
-      <div class="dbox">
-        <div class="dgrid">
-          <?php foreach ($demoRoles as $d): ?>
-          <button type="button" class="dpill" data-u="<?= $d['u'] ?>" data-p="password123">
-            <strong><i data-lucide="<?= $d['icon'] ?>"></i> <?= htmlspecialchars($d['label']) ?></strong>
-            <span><?= $d['u'] ?></span>
-          </button>
-          <?php endforeach; ?>
+        <div class="logo-divider"></div>
+        <div class="brand-text">
+          <h3>Sistem Operasional Terpadu</h3>
+          <h1>Al-SyukroSmart Ops</h1>
         </div>
       </div>
-      <p class="reglink">Butuh akun baru? Hubungi <b>Administrator Sistem</b> untuk dibuatkan akun sesuai peran Anda.</p>
+      <div class="panel-left-bottom">
+        <div class="feature-item"><i data-lucide="shield-check"></i> Profesional</div>
+        <div class="feature-item"><i data-lucide="link"></i> Terintegrasi</div>
+        <div class="feature-item"><i data-lucide="home"></i> Berkelanjutan</div>
+      </div>
+    </div>
+    
+    <div class="panel-right">
+      <div class="form-header">
+        <h2>Masuk ke akun Anda</h2>
+      </div>
+      
+      <form method="POST">
+        <?= csrf_field() ?>
+        <div class="input-group">
+          <div class="input-icon"><i data-lucide="mail"></i></div>
+          <input class="input-control" type="text" name="username" id="username" value="<?= htmlspecialchars($_POST['username'] ?? '') ?>" placeholder="Username atau Email" required autofocus>
+        </div>
+        
+        <div class="input-group">
+          <div class="input-icon"><i data-lucide="lock"></i></div>
+          <input class="input-control" type="password" name="password" id="pw" placeholder="Password" required>
+          <button type="button" class="pwd-toggle" id="eyeBtn"><i data-lucide="eye"></i></button>
+        </div>
+        
+        
+        <button type="submit" class="btn-login">Masuk</button>
+      </form>
+      
+      <div class="divider">MODE DEMO</div>
+      <div class="demo-grid">
+        <?php foreach ($demoRoles as $d): ?>
+        <button type="button" class="demo-card dpill" data-u="<?= $d['u'] ?>" data-p="password123">
+          <i data-lucide="<?= $d['icon'] ?>"></i>
+          <div class="demo-card-info">
+            <strong><?= htmlspecialchars($d['label']) ?></strong>
+            <span><?= $d['u'] ?></span>
+          </div>
+        </button>
+        <?php endforeach; ?>
+      </div>
+      
+
     </div>
   </div>
 </div>
@@ -226,16 +470,22 @@ lucide.createIcons();
 document.querySelectorAll('.dpill').forEach(b=>{
   b.addEventListener('click',()=>{document.getElementById('username').value=b.dataset.u;document.getElementById('pw').value=b.dataset.p});
 });
-const pw=document.getElementById('pw'),eye=document.getElementById('eyeBtn');
-eye.addEventListener('click',()=>{
-  const type = pw.type === 'password' ? 'text' : 'password';
-  pw.type = type;
-  eye.innerHTML = type === 'password' ? '<i data-lucide="eye"></i>' : '<i data-lucide="eye-off"></i>';
+const pw = document.getElementById('pw');
+const eye = document.getElementById('eyeBtn');
+
+function togglePassword(show) {
+  pw.type = show ? 'text' : 'password';
+  eye.innerHTML = show ? '<i data-lucide="eye-off"></i>' : '<i data-lucide="eye"></i>';
   lucide.createIcons({ root: eye });
-});
+}
+
+eye.addEventListener('click', () => togglePassword(pw.type === 'password'));
 
 <?php if ($error): ?>
 Swal.fire({ title: 'Terjadi Kesalahan!', text: <?= json_encode($error) ?>, icon: 'error', confirmButtonText: 'OK', confirmButtonColor: '#145c3f' });
+<?php endif; ?>
+<?php if (isset($_GET['kicked'])): ?>
+Swal.fire({ title: 'Sesi Berakhir', text: 'Akun Anda telah masuk di perangkat lain. Sesi pada perangkat ini telah diakhiri.', icon: 'info', confirmButtonText: 'OK', confirmButtonColor: '#145c3f' });
 <?php endif; ?>
 <?php if (isset($_GET['registered'])): ?>
 Swal.fire({ title: 'Berhasil!', text: 'Registrasi berhasil! Silakan login.', icon: 'success', confirmButtonText: 'OK', confirmButtonColor: '#145c3f' });

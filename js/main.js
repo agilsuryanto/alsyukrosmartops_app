@@ -1,178 +1,204 @@
-/* AL-SYUKROSMART OPS — main.js */
+/* AL-SYUKROSMART OPS — main.js
+   Fungsi inti frontend: modal, notifikasi toast, konfirmasi, sanitasi, dan komunikasi API */
 'use strict';
 
-/* TOAST / POPUP */
-function toast(msg, type = 'info', duration = 4000) {
-    if (typeof Swal !== 'undefined') {
-        const titleMap = { success: 'Berhasil!', error: 'Terjadi Kesalahan!', warning: 'Peringatan!', info: 'Informasi' };
-        Swal.fire({
-            title: titleMap[type] || 'Informasi',
-            text: msg,
-            icon: type,
-            showConfirmButton: true,
-            confirmButtonText: 'OK',
-            confirmButtonColor: 'var(--bs-primary, #145c3f)'
-        });
-    } else {
-        const c = document.getElementById('toastContainer');
-        if (!c) { console.log(`[${type}] ${msg}`); return; }
-        const el = document.createElement('div');
-        el.className = `toast toast-${type}`;
-        const ic = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
-        el.innerHTML = `<span style="font-size:16px;">${ic[type] || 'ℹ️'}</span><span style="flex:1;line-height:1.4;">${msg}</span>`;
-        el.onclick = () => el.remove();
-        c.appendChild(el);
-        setTimeout(() => { el.style.transition = 'opacity .4s,transform .4s'; el.style.opacity = '0'; el.style.transform = 'translateX(120%)'; setTimeout(() => el.remove(), 400); }, duration);
-    }
+/** Sanitasi string untuk mencegah XSS pada rendering innerHTML */
+function esc(str) {
+    if (str === null || str === undefined) return '';
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(str).replace(/[&<>"']/g, m => map[m]);
 }
 
-/* API FETCH — dipakai oleh semua halaman modul (api/<resource>.php) */
-async function apiFetch(resource, action, data = {}, method = 'POST') {
-    try {
-        let url, opts = {};
-        if (method === 'GET') {
-            url = `api/${resource}.php?${new URLSearchParams({ ...data, action, _t: Date.now() })}`;
-            opts = { method: 'GET', cache: 'no-store' };
-        } else {
-            url = `api/${resource}.php`;
-            const b = new FormData();
-            b.append('action', action);
-            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
-            if (csrfMeta) b.append('csrf_token', csrfMeta.content);
-            Object.entries(data).forEach(([k, v]) => b.append(k, v));
-            opts = { method: 'POST', body: b };
-        }
-        const res = await fetch(url, opts);
-        return await res.json();
-    } catch (err) { return { ok: false, msg: 'Koneksi gagal: ' + err.message }; }
+/** Membuka modal overlay berdasarkan ID elemen */
+function openModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const errBox = el.querySelector('.modal-error-box');
+    if (errBox) errBox.remove();
+    el.classList.add('open');
+    if (window.lucide) lucide.createIcons({ root: el });
 }
 
-/* MODAL */
+/** Menutup modal overlay */
+function closeModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('open');
+    const errBox = el.querySelector('.modal-error-box');
+    if (errBox) errBox.remove();
+}
+
+/** Menampilkan pesan error di dalam modal */
 function showModalError(modalId, msg) {
-    const modalBody = document.querySelector(`#${modalId} .modal-body`);
-    if (!modalBody) { toast(msg, 'error'); return; }
-    let errBox = modalBody.querySelector('.modal-error-box');
+    const modalEl = document.getElementById(modalId);
+    if (!modalEl) return toast(msg, 'error');
+    const modalDialog = modalEl.querySelector('.modal') || modalEl;
+    let errBox = modalDialog.querySelector('.modal-error-box');
     if (!errBox) {
         errBox = document.createElement('div');
-        errBox.className = 'modal-error-box';
-        errBox.style.cssText = 'margin-bottom:14px;padding:10px 14px;border-radius:var(--bs-border-radius, .6rem);background:var(--danger-tint, #f8e6e2);color:var(--danger, #b3392b);font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px;border:1px solid rgba(179,57,43,0.2);';
-        modalBody.insertBefore(errBox, modalBody.firstChild);
+        errBox.className = 'modal-error-box alert alert-danger';
+        errBox.style.margin = '14px 22px 0';
+        errBox.style.fontSize = '12.5px';
+        const modalBody = modalDialog.querySelector('.modal-body');
+        if (modalBody) {
+            modalDialog.insertBefore(errBox, modalBody);
+        } else {
+            modalDialog.prepend(errBox);
+        }
     }
-    errBox.innerHTML = `<svg style="width:16px;height:16px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg><span style="flex:1;line-height:1.4">${msg}</span>`;
-    errBox.style.display = 'flex';
-    errBox.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    errBox.textContent = msg;
+    errBox.style.display = 'block';
 }
 
-function clearModalError(modalId) {
-    const errBox = document.querySelector(`#${modalId} .modal-error-box`);
-    if (errBox) errBox.style.display = 'none';
+/** Notifikasi Toast melayang (menggunakan SweetAlert2 jika ada, atau fallback DOM element) */
+function toast(msg, type = 'info') {
+    if (window.Swal) {
+        const iconMap = {
+            'success': 'success',
+            'error': 'error',
+            'warning': 'warning',
+            'info': 'info'
+        };
+        const Toast = Swal.mixin({
+            toast: true,
+            position: 'top-end',
+            showConfirmButton: false,
+            timer: 3500,
+            timerProgressBar: true,
+            didOpen: (toastEl) => {
+                toastEl.addEventListener('mouseenter', Swal.stopTimer);
+                toastEl.addEventListener('mouseleave', Swal.resumeTimer);
+            }
+        });
+        Toast.fire({
+            icon: iconMap[type] || 'info',
+            title: esc(msg)
+        });
+        return;
+    }
+
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        document.body.appendChild(container);
+    }
+    const t = document.createElement('div');
+    t.className = `app-toast app-toast-${type}`;
+    t.innerHTML = `<span style="flex:1">${esc(msg)}</span>`;
+    t.onclick = () => t.remove();
+    container.appendChild(t);
+    setTimeout(() => {
+        if (t.parentElement) t.remove();
+    }, 4000);
 }
 
-function openModal(id) { 
-    clearModalError(id);
-    document.getElementById(id)?.classList.add('open'); 
+/** Dialog konfirmasi interaktif (SweetAlert2 atau fallback confirm native) */
+function customConfirm(message, confirmText = 'Ya', btnClass = 'btn-primary', iconHtml = '') {
+    if (window.Swal) {
+        return Swal.fire({
+            html: (iconHtml ? `<div style="margin-bottom:12px">${iconHtml}</div>` : '') + `<div style="font-size:14px;font-weight:500;">${esc(message)}</div>`,
+            showCancelButton: true,
+            confirmButtonText: confirmText,
+            cancelButtonText: 'Batal',
+            buttonsStyling: false,
+            customClass: {
+                confirmButton: `btn ${btnClass} me-2`,
+                cancelButton: 'btn btn-outline'
+            }
+        }).then(res => res.isConfirmed);
+    }
+    return Promise.resolve(confirm(message));
 }
-function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
 
-function customConfirm(msg, btnText = 'Ya', btnClass = 'btn-primary', icon = '⚠️') {
-    return new Promise(resolve => {
-        const id = 'confirm_' + Date.now();
-        const html = `
-        <div class="modal-overlay open" id="${id}" style="z-index:9999">
-            <div class="modal" style="max-width:400px;text-align:center;padding:28px;margin:auto">
-                <div style="font-size:42px;margin-bottom:14px">${icon}</div>
-                <h3 style="font-family:var(--font-display);font-size:18px;font-weight:600;margin-bottom:8px">Konfirmasi</h3>
-                <p style="color:var(--muted);margin-bottom:22px;font-size:13.5px">${msg}</p>
-                <div style="display:flex;gap:10px;justify-content:center">
-                    <button class="btn btn-outline" style="flex:1" id="btnCancel_${id}">Batal</button>
-                    <button class="btn ${btnClass}" style="flex:1" id="btnOk_${id}">${btnText}</button>
-                </div>
-            </div>
-        </div>`;
-        document.body.insertAdjacentHTML('beforeend', html);
+/** Pembungkus pemanggilan API backend terpadu dengan proteksi CSRF */
+async function apiFetch(modul, action, payload = {}, method = 'POST') {
+    const metaCsrf = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = metaCsrf ? metaCsrf.content : '';
+    let url = `api/${modul}.php`;
+    const opts = { method: method.toUpperCase(), cache: 'no-store' };
+
+    if (opts.method === 'GET') {
+        const params = new URLSearchParams();
+        params.append('action', action);
+        for (const [k, v] of Object.entries(payload)) {
+            if (v !== undefined && v !== null) params.append(k, v);
+        }
+        params.append('_t', Date.now());
+        url += '?' + params.toString();
+    } else {
+        let fd;
+        if (payload instanceof FormData) {
+            fd = payload;
+            if (!fd.has('action')) fd.append('action', action);
+            if (!fd.has('csrf_token')) fd.append('csrf_token', csrfToken);
+        } else {
+            fd = new FormData();
+            fd.append('action', action);
+            fd.append('csrf_token', csrfToken);
+            for (const [k, v] of Object.entries(payload)) {
+                if (v !== undefined && v !== null) {
+                    if (Array.isArray(v)) {
+                        const key = k.endsWith('[]') ? k : `${k}[]`;
+                        for (const item of v) {
+                            fd.append(key, item);
+                        }
+                    } else {
+                        fd.append(k, v);
+                    }
+                }
+            }
+        }
+        opts.body = fd;
+    }
+
+    try {
+        const res = await fetch(url, opts);
+        const data = await res.json();
+        if (res.status === 401) {
+            window.location.href = 'index.php';
+        }
+        return data;
+    } catch (err) {
+        console.error('API Error:', err);
+        return { ok: false, msg: 'Terjadi kesalahan sistem atau koneksi.' };
+    }
+}
+
+/** Update isi elemen DOM dan inisialisasi ulang icon Lucide */
+function updateDOM(id, html) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.innerHTML = html;
         if (window.lucide) lucide.createIcons();
-        const overlay = document.getElementById(id);
-        const handleKey = (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); close(true); }
-            if (e.key === 'Escape') { e.preventDefault(); close(false); }
-        };
-        const close = (result) => { 
-            document.removeEventListener('keydown', handleKey);
-            overlay.remove(); 
-            resolve(result); 
-        };
-        document.addEventListener('keydown', handleKey);
-        const btnOk = document.getElementById(`btnOk_${id}`);
-        document.getElementById(`btnCancel_${id}`).onclick = () => close(false);
-        btnOk.onclick = () => close(true);
-        btnOk.focus();
-    });
-}
-
-function customPrompt(msg, defaultValue = '') {
-    return new Promise(resolve => {
-        const id = 'prompt_' + Date.now();
-        const html = `
-        <div class="modal-overlay open" id="${id}" style="z-index:9999;backdrop-filter:blur(3px)">
-            <div class="modal" style="max-width:400px;padding:24px;margin:auto">
-                <h3 style="font-family:var(--font-display);font-size:16px;font-weight:600;margin-bottom:12px">${msg}</h3>
-                <div class="fld" style="margin-bottom:20px;width:100%">
-                    <input type="text" id="input_${id}" value="${defaultValue}" style="width:100%" placeholder="Ketik di sini...">
-                </div>
-                <div style="display:flex;gap:10px;justify-content:flex-end">
-                    <button class="btn btn-outline" id="btnCancel_${id}">Batal</button>
-                    <button class="btn btn-primary" id="btnOk_${id}">OK</button>
-                </div>
-            </div>
-        </div>`;
-        document.body.insertAdjacentHTML('beforeend', html);
-        const overlay = document.getElementById(id);
-        const input = document.getElementById(`input_${id}`);
-        const handleKey = (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); close(input.value); }
-            if (e.key === 'Escape') { e.preventDefault(); close(null); }
-        };
-        const close = (result) => {
-            document.removeEventListener('keydown', handleKey);
-            overlay.remove();
-            resolve(result);
-        };
-        document.addEventListener('keydown', handleKey);
-        const btnOk = document.getElementById(`btnOk_${id}`);
-        document.getElementById(`btnCancel_${id}`).onclick = () => close(null);
-        btnOk.onclick = () => close(input.value);
-        input.focus();
-    });
-}
-
-const _lastRender = {};
-function updateDOM(id, newHTML) {
-    if (_lastRender[id] !== newHTML) {
-        const el = document.getElementById(id);
-        if (el) {
-            el.innerHTML = newHTML;
-            _lastRender[id] = newHTML;
-            if (window.lucide) lucide.createIcons({ nameAttr: 'data-lucide' }); // re-render icons if changed
-        }
     }
 }
 
-/* Klik di luar modal / tombol close menutup modal */
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); }));
-    document.querySelectorAll('.modal-close').forEach(btn => btn.addEventListener('click', () => btn.closest('.modal-overlay')?.classList.remove('open')));
+function customPrompt(message, defaultValue = '') {
+    return Promise.resolve(window.prompt(message, defaultValue));
+}
 
-    /* Sidebar mobile (jika elemen toggle tersedia) */
-    const menuBtn = document.getElementById('menuToggle');
-    const sb = document.querySelector('.sidebar');
-    if (menuBtn && sb) menuBtn.addEventListener('click', () => sb.classList.toggle('open'));
+// Tutup modal jika overlay (latar belakang luar) diklik
+document.addEventListener('click', (e) => {
+    if (e.target.classList && e.target.classList.contains('modal-overlay')) {
+        closeModal(e.target.id);
+    }
+});
 
-    /* Tutup panel notifikasi saat klik di luar */
-    document.addEventListener('click', (e) => {
-        const panel = document.getElementById('notifPanel');
-        const btn = document.getElementById('notifBtn');
-        if (panel && btn && panel.style.display === 'block' && !panel.contains(e.target) && !btn.contains(e.target)) {
-            panel.style.display = 'none';
+// Tekan tombol Enter pada input di modal untuk langsung memicu tombol aksi utama (Simpan)
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        const tag = (e.target.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA' || tag === 'BUTTON') return;
+
+        const modalOverlay = e.target.closest('.modal-overlay.open');
+        if (modalOverlay) {
+            const submitBtn = modalOverlay.querySelector('.modal-foot button.btn-primary:not([disabled]), .modal-foot .btn-primary:not([disabled])')
+                           || modalOverlay.querySelector('button.btn-primary:not([disabled])');
+            if (submitBtn) {
+                e.preventDefault();
+                submitBtn.click();
+            }
         }
-    });
+    }
 });
