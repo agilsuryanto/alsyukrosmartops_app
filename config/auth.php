@@ -295,6 +295,45 @@ function csrf_field() {
 if (!function_exists('esc')) {
     function esc($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 }
+if (!function_exists('periodeIndonesia')) {
+    /**
+     * Format tanggal / periode ke dalam Bahasa Indonesia.
+     * Contoh:
+     * - periodeIndonesia('F Y') => "November 2026"
+     * - periodeIndonesia('d F Y') => "15 November 2026"
+     * - periodeIndonesia('d M Y') => "15 Nov 2026"
+     */
+    function periodeIndonesia(string $format = 'F Y', ?int $timestamp = null): string {
+        $ts = $timestamp ?? time();
+        $bulanLengkap = [
+            1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+            5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+            9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+        ];
+        $bulanSingkat = [
+            1 => 'Jan', 2 => 'Feb', 3 => 'Mar', 4 => 'Apr',
+            5 => 'Mei', 6 => 'Jun', 7 => 'Jul', 8 => 'Agu',
+            9 => 'Sep', 10 => 'Okt', 11 => 'Nov', 12 => 'Des'
+        ];
+        $n = (int)date('n', $ts);
+        $escapedFull = addcslashes($bulanLengkap[$n], 'A..Za..z');
+        $escapedShort = addcslashes($bulanSingkat[$n], 'A..Za..z');
+
+        $fmt = '';
+        $len = strlen($format);
+        for ($i = 0; $i < $len; $i++) {
+            $c = $format[$i];
+            if ($c === 'F') {
+                $fmt .= $escapedFull;
+            } elseif ($c === 'M') {
+                $fmt .= $escapedShort;
+            } else {
+                $fmt .= $c;
+            }
+        }
+        return date($fmt, $ts);
+    }
+}
 function csrf_verify() {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
     $sent = $_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
@@ -321,16 +360,15 @@ function getClientIp() {
 function checkIpRateLimit() {
     global $conn;
     $ip = getClientIp();
-    $timeLimit = date('Y-m-d H:i:s', time() - 15 * 60);
-    // Cleanup old attempts occasionally
+    // Cleanup old attempts occasionally directly in SQL
     if (rand(1, 100) === 1) {
-        $conn->query("DELETE FROM login_attempts WHERE created_at < '$timeLimit'");
+        $conn->query("DELETE FROM login_attempts WHERE created_at < (NOW() - INTERVAL 15 MINUTE)");
     }
     
     try {
-        $stmt = $conn->prepare("SELECT COUNT(*) as count FROM login_attempts WHERE ip = ? AND created_at >= ?");
+        $stmt = $conn->prepare("SELECT COUNT(*) as count FROM login_attempts WHERE ip = ? AND created_at >= (NOW() - INTERVAL 15 MINUTE)");
         if (!$stmt) return false;
-        $stmt->bind_param("ss", $ip, $timeLimit);
+        $stmt->bind_param("s", $ip);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         return ($row['count'] ?? 0) >= 10;
@@ -363,9 +401,9 @@ function registerFailedLogin($userId) {
     $row = $stmt->get_result()->fetch_assoc();
     $attempts = (int)($row['failed_attempts'] ?? 0) + 1;
     if ($attempts >= LOGIN_MAX_ATTEMPTS) {
-        $lockedUntil = date('Y-m-d H:i:s', time() + LOGIN_LOCKOUT_MINUTES * 60);
-        $stmt = $conn->prepare("UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?");
-        $stmt->bind_param("isi", $attempts, $lockedUntil, $userId);
+        $lockMinutes = LOGIN_LOCKOUT_MINUTES;
+        $stmt = $conn->prepare("UPDATE users SET failed_attempts=?, locked_until = (NOW() + INTERVAL ? MINUTE) WHERE id=?");
+        $stmt->bind_param("iii", $attempts, $lockMinutes, $userId);
         $stmt->execute();
         removeUserSession($userId);
     } else {

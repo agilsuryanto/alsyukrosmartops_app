@@ -31,7 +31,8 @@ if (in_array('karyawan', $modules)) {
     }
 }
 if (in_array('arsip', $modules)) {
-    $n = $conn->query("SELECT COUNT(*) n FROM arsip")->fetch_assoc()['n'];
+    $visWhere = visibleWhere($role, $user['id']);
+    $n = $conn->query("SELECT COUNT(*) n FROM arsip WHERE $visWhere")->fetch_assoc()['n'];
     $cards[] = ['icon' => 'archive', 'color' => '#1f7a6c', 'label' => 'Total Dokumen Arsip', 'value' => $n, 'link' => 'arsip'];
 }
 

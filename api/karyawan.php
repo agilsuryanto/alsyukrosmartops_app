@@ -882,8 +882,15 @@ switch ($action) {
             if (!$isPelaksana) {
                 forbidden('Akses ditolak. Anda tidak berwenang mengubah tugas karyawan lain.');
             }
-            if ($task['tanggal'] !== date('Y-m-d')) {
-                forbidden('Tugas rutin hanya dapat diperbarui pada tanggal hari ini.');
+            if ($task['jenis'] === 'rutin') {
+                if ($task['tanggal'] !== date('Y-m-d')) {
+                    forbidden('Tugas rutin hanya dapat diperbarui pada tanggal hari ini.');
+                }
+            } else {
+                // Non-rutin: Pelaksana hanya melaporkan hasil dan bukti foto, tidak berwenang mengubah rincian tugas
+                if (isset($_POST['deskripsi']) && trim($_POST['deskripsi']) !== '' && trim($_POST['deskripsi']) !== trim($task['deskripsi'])) {
+                    forbidden('Karyawan pelaksana tidak berwenang mengubah rincian tugas non-rutin.');
+                }
             }
         } elseif ($task['jenis'] === 'rutin') {
             forbidden('Tugas rutin dikelola sendiri oleh karyawan pelaksana bersangkutan.');
@@ -899,7 +906,7 @@ switch ($action) {
 
         $status = in_array($_POST['status'] ?? '', ['ditugaskan', 'dikerjakan', 'selesai']) ? $_POST['status'] : $task['status'];
         $hasil = isset($_POST['hasil_laporan']) ? trim($_POST['hasil_laporan']) : $task['hasil_laporan'];
-        $deskripsi = (!empty($_POST['deskripsi']) && $isPelaksana) ? trim($_POST['deskripsi']) : $task['deskripsi'];
+        $deskripsi = ($task['jenis'] === 'rutin' && !empty($_POST['deskripsi']) && $isPelaksana) ? trim($_POST['deskripsi']) : $task['deskripsi'];
         $selesaiPada = ($status === 'selesai') ? ($task['selesai_pada'] ?: date('Y-m-d H:i:s')) : null;
 
         // Penanganan hapus foto yang diminta
@@ -980,7 +987,7 @@ switch ($action) {
 
         // Jika status selesai, wajib minimal ada 1 foto (di kegiatan_foto atau foto_laporan)
         if ($status === 'selesai' && $currFotosCount < 1 && empty($task['foto_laporan'])) {
-            fail('Menandai tugas rutin selesai wajib melampirkan minimal 1 foto bukti.');
+            fail('Menandai tugas selesai wajib melampirkan minimal 1 foto bukti.');
         }
 
         $stmt = $conn->prepare("UPDATE kegiatan_karyawan SET deskripsi=?, status=?, hasil_laporan=?, selesai_pada=? WHERE id=?");
@@ -1233,7 +1240,7 @@ switch ($action) {
 
         $kegiatan_id = !empty($_POST['kegiatan_id']) ? (int)$_POST['kegiatan_id'] : null;
         $karyawan_id = (int)($_POST['karyawan_id'] ?? 0);
-        $periode = trim($_POST['periode'] ?? date('F Y'));
+        $periode = trim($_POST['periode'] ?? periodeIndonesia('F Y'));
         $catatan = trim($_POST['catatan'] ?? '');
 
         // Validasi skor nilai: wajib bilangan bulat 1-5

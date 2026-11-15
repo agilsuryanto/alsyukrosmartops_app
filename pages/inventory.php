@@ -76,7 +76,7 @@
     <div class="tab-panel" id="panel-pinjam" <?= $activeTab === 'pinjam' ? '' : 'style="display:none"' ?>>
         <div class="card">
             <div class="card-head">
-                <div><h2>Pengajuan & Persetujuan Peminjaman</h2><p>Alur: Ajukan → Verifikasi (Staff Inventaris) → Approve (SPV Inventaris).</p></div>
+                <div><h2>Pengajuan & Persetujuan Peminjaman</h2><p>Alur: Pengajuan → Persetujuan Atasan Unit → Verifikasi (Staff Inventaris) → Approval (SPV Inventaris).</p></div>
                 <div class="hgroup">
                     <div id="toolbarPinjam"></div>
                     <?php if ($canAjukan): ?>
