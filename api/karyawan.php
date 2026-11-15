@@ -131,7 +131,12 @@ switch ($action) {
             $idsStr = !empty($accessibleIds) ? implode(',', array_map('intval', $accessibleIds)) : '0';
             $atasanList = $conn->query("SELECT k.id, k.nip, k.nama, k.jabatan FROM karyawan k WHERE k.status='aktif' AND k.id IN ($idsStr) AND ($pimFilterK) ORDER BY k.nama ASC")->fetch_all(MYSQLI_ASSOC);
         }
-        $users = $conn->query("SELECT id, username, name FROM users WHERE status='aktif' ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
+        // Hanya kembalikan akun pengguna aktif yang belum tertaut ke data karyawan mana pun
+        $users = $conn->query("SELECT u.id, u.username, u.name 
+                               FROM users u 
+                               WHERE u.status = 'aktif' 
+                                 AND NOT EXISTS (SELECT 1 FROM karyawan k WHERE k.user_id = u.id) 
+                               ORDER BY u.name ASC")->fetch_all(MYSQLI_ASSOC);
         $jabatanList = $conn->query("SELECT DISTINCT k.jabatan FROM karyawan k WHERE k.jabatan IS NOT NULL AND TRIM(k.jabatan) != '' AND ($pimFilterK) ORDER BY k.jabatan ASC")->fetch_all(MYSQLI_ASSOC);
 
         // Karyawan pelaksana yang dapat diberikan tugas (hanya CSO atau Gardener; HRD tidak berwenang)
@@ -213,6 +218,17 @@ switch ($action) {
 
         if (!$nama || !$jabatan) {
             fail('Nama dan Jabatan wajib diisi.');
+        }
+
+        // Validasi akun pengguna (user_id): satu akun hanya boleh tertaut ke satu data karyawan
+        if ($user_id !== null) {
+            $stmtCekUser = $conn->prepare("SELECT id, nip, nama FROM karyawan WHERE user_id = ? LIMIT 1");
+            $stmtCekUser->bind_param("i", $user_id);
+            $stmtCekUser->execute();
+            $existingUser = $stmtCekUser->get_result()->fetch_assoc();
+            if ($existingUser) {
+                fail("Akun pengguna ini sudah tertaut dengan data karyawan {$existingUser['nama']} (NIP: {$existingUser['nip']}). Satu akun hanya boleh tertaut ke satu karyawan.");
+            }
         }
 
         // Validasi akses unit Pimpinan/Direksi
@@ -352,6 +368,17 @@ switch ($action) {
 
         if (!$nip || !$nama || !$jabatan) {
             fail('Data karyawan tidak lengkap.');
+        }
+
+        // Validasi akun pengguna (user_id): satu akun hanya boleh tertaut ke satu data karyawan
+        if ($user_id !== null && $user_id !== (int)($existing['user_id'] ?? 0)) {
+            $stmtCekUser = $conn->prepare("SELECT id, nip, nama FROM karyawan WHERE user_id = ? AND id != ? LIMIT 1");
+            $stmtCekUser->bind_param("ii", $user_id, $id);
+            $stmtCekUser->execute();
+            $existingUser = $stmtCekUser->get_result()->fetch_assoc();
+            if ($existingUser) {
+                fail("Akun pengguna ini sudah tertaut dengan data karyawan {$existingUser['nama']} (NIP: {$existingUser['nip']}). Satu akun hanya boleh tertaut ke satu karyawan.");
+            }
         }
 
         $postedDivisi = array_key_exists('divisi_id', $_POST)

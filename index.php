@@ -40,8 +40,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($found) {
                     session_regenerate_id(true);
                     $newSid = session_id();
+                    // claimUserSession selalu return true kecuali user tidak ditemukan di DB
                     if (!claimUserSession($found['id'], $newSid, getClientIp(), $_SERVER['HTTP_USER_AGENT'] ?? '')) {
-                        $error = 'Gagal memproses sesi login. Silakan coba lagi.';
+                        $error = 'Akun tidak ditemukan. Silakan hubungi Administrator.';
                     } else {
                         resetFailedLogin($found['id']);
                         $_SESSION['user_id'] = $found['id'];

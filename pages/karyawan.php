@@ -1179,14 +1179,7 @@ async function loadDropdowns() {
     }
 
     // User options
-    const selUser = document.getElementById('kUser');
-    if (selUser) {
-        let optUsers = '<option value="">-- Tanpa Akun Login --</option>';
-        (dropdownOptions.users || []).forEach(u => {
-            optUsers += `<option value="${u.id}">${esc(u.name)} (@${esc(u.username)})</option>`;
-        });
-        selUser.innerHTML = optUsers;
-    }
+    renderUserOptionsKaryawan();
 
     // Karyawan pelaksana untuk penugasan non-rutin
     const selKgKar = document.getElementById('kgKaryawan');
@@ -1378,6 +1371,28 @@ function filterDataKaryawan() {
     renderTabelKaryawan(filtered);
 }
 
+function renderUserOptionsKaryawan(selectedUserId = null, currentUserName = '', currentUsername = '') {
+    const selUser = document.getElementById('kUser');
+    if (!selUser) return;
+    let optUsers = '<option value="">-- Tanpa Akun Login --</option>';
+    let currentInList = false;
+    (dropdownOptions.users || []).forEach(u => {
+        const isSel = selectedUserId && Number(u.id) === Number(selectedUserId);
+        if (isSel) currentInList = true;
+        optUsers += `<option value="${u.id}" ${isSel ? 'selected' : ''}>${esc(u.name)} (@${esc(u.username)})</option>`;
+    });
+    if (selectedUserId && !currentInList) {
+        const label = currentUserName ? `${currentUserName}${currentUsername ? ` (@${currentUsername})` : ''}` : `User #${selectedUserId}`;
+        optUsers += `<option value="${selectedUserId}" selected>${esc(label)} (Akun saat ini)</option>`;
+    }
+    selUser.innerHTML = optUsers;
+    if (selectedUserId) {
+        selUser.value = selectedUserId;
+    } else {
+        selUser.value = '';
+    }
+}
+
 function bukaModalKaryawan() {
     document.getElementById('modalKaryawanTitle').textContent = 'Tambah Karyawan Baru';
     document.getElementById('kId').value = '';
@@ -1390,7 +1405,7 @@ function bukaModalKaryawan() {
     document.getElementById('kTanggalMasuk').value = '';
     document.getElementById('kKontak').value = '';
     document.getElementById('kAtasan').value = '';
-    document.getElementById('kUser').value = '';
+    renderUserOptionsKaryawan(null);
     document.getElementById('kStatusWrapper').style.display = 'none';
     const hintNip = document.getElementById('hintNipAuto');
     if (hintNip) hintNip.style.display = 'block';
@@ -1448,7 +1463,7 @@ function bukaEditKaryawan(id) {
     document.getElementById('kTanggalMasuk').value = k.tanggal_masuk || '';
     document.getElementById('kKontak').value = k.kontak || '';
     document.getElementById('kAtasan').value = k.atasan_id || '';
-    document.getElementById('kUser').value = k.user_id || '';
+    renderUserOptionsKaryawan(k.user_id, k.nama_user || k.nama, k.username || '');
     document.getElementById('kStatus').value = k.status || 'aktif';
     document.getElementById('kStatusWrapper').style.display = 'block';
 

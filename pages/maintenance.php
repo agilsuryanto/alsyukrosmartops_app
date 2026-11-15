@@ -9,7 +9,7 @@ $canApprovePengganti = hasAccess($role, 'maintenance', 'approve_pengganti');
 $canKelola = hasAccess($role, 'maintenance', 'kelola');
 $canMonitoring = hasAccess($role, 'maintenance', 'monitoring');
 $totalPengajuan = $conn->query("SELECT COUNT(*) n FROM pengajuan_maintenance")->fetch_assoc()['n'];
-$totalOpen = $conn->query("SELECT COUNT(*) n FROM pengajuan_maintenance WHERE status NOT IN ('selesai','ditolak')")->fetch_assoc()['n'];
+$totalOpen = $conn->query("SELECT COUNT(*) n FROM pengajuan_maintenance WHERE status NOT IN ('selesai','ditolak','ditolak_atasan')")->fetch_assoc()['n'];
 $totalSelesai = $conn->query("SELECT COUNT(*) n FROM pengajuan_maintenance WHERE status='selesai'")->fetch_assoc()['n'];
 ?>
 <div class="stat-grid">

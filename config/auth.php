@@ -110,6 +110,9 @@ function removeUserSession($userId, $sessionId = null) {
  * Login baru yang valid akan mengambil alih sesi aktif dan menggantikan sesi lama,
  * sehingga user tidak terkunci jika sebelumnya menutup browser tanpa logout.
  * Sesi lama pada perangkat/browser lain otomatis diakhiri pada aktivitas berikutnya.
+ *
+ * Fungsi ini selalu return true selama autentikasi user valid — kegagalan pencatatan
+ * sesi di DB (misalnya saat tabel belum siap) tidak memblokir proses login.
  */
 function claimUserSession($userId, $sessionId, $ip = null, $userAgent = null) {
     global $conn;
@@ -125,18 +128,21 @@ function claimUserSession($userId, $sessionId, $ip = null, $userAgent = null) {
     $ipAddr = $ip !== null ? (string)$ip : (function_exists('getClientIp') ? getClientIp() : ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'));
     $uaShort = mb_substr((string)($userAgent ?? ($_SERVER['HTTP_USER_AGENT'] ?? '')), 0, 255);
 
-    $conn->begin_transaction();
     try {
+        $conn->begin_transaction();
+
         // 1. Kunci baris user di tabel `users` agar dua percobaan login bersamaan pada akun yang sama mengantre
         $stmtLock = $conn->prepare("SELECT id FROM users WHERE id = ? FOR UPDATE");
         if (!$stmtLock) {
             $conn->rollback();
-            return false;
+            // Fallback: izinkan login meski log sesi gagal — user tetap bisa masuk
+            return true;
         }
         $stmtLock->bind_param("i", $userId);
         $stmtLock->execute();
         $resLock = $stmtLock->get_result();
         if (!$resLock || $resLock->num_rows === 0) {
+            // User tidak ditemukan sama sekali — blokir login
             $conn->rollback();
             return false;
         }
@@ -146,7 +152,7 @@ function claimUserSession($userId, $sessionId, $ip = null, $userAgent = null) {
         $stmtSess = $conn->prepare("SELECT session_id, last_activity FROM user_sessions WHERE user_id = ? FOR UPDATE");
         if (!$stmtSess) {
             $conn->rollback();
-            return false;
+            return true; // Fallback: sesi tidak tercatat, tapi login tetap diizinkan
         }
         $stmtSess->bind_param("i", $userId);
         $stmtSess->execute();
@@ -162,30 +168,27 @@ function claimUserSession($userId, $sessionId, $ip = null, $userAgent = null) {
                 logAktivitas($userId, 'auth', 'Sesi aktif dialihkan ke perangkat baru (' . $ipAddr . ')');
             }
 
-            // Gantikan sesi lama dengan sesi baru (mengambil alih sehingga tetap 1 akun = 1 sesi aktif)
+            // Gantikan sesi lama dengan sesi baru (mengambil alih — 1 akun = 1 sesi aktif)
             $stmtUpd = $conn->prepare("UPDATE user_sessions SET session_id = ?, ip = ?, user_agent = ?, login_at = ?, last_activity = ? WHERE user_id = ?");
-            if (!$stmtUpd) {
-                $conn->rollback();
-                return false;
+            if ($stmtUpd) {
+                $stmtUpd->bind_param("sssssi", $sessionId, $ipAddr, $uaShort, $nowStr, $nowStr, $userId);
+                $stmtUpd->execute();
             }
-            $stmtUpd->bind_param("sssssi", $sessionId, $ipAddr, $uaShort, $nowStr, $nowStr, $userId);
-            $stmtUpd->execute();
         } else {
             // Belum ada sesi aktif -> masukkan baris baru
             $stmtIns = $conn->prepare("INSERT INTO user_sessions (user_id, session_id, ip, user_agent, login_at, last_activity) VALUES (?, ?, ?, ?, ?, ?)");
-            if (!$stmtIns) {
-                $conn->rollback();
-                return false;
+            if ($stmtIns) {
+                $stmtIns->bind_param("isssss", $userId, $sessionId, $ipAddr, $uaShort, $nowStr, $nowStr);
+                $stmtIns->execute();
             }
-            $stmtIns->bind_param("isssss", $userId, $sessionId, $ipAddr, $uaShort, $nowStr, $nowStr);
-            $stmtIns->execute();
         }
 
         $conn->commit();
         return true;
     } catch (Throwable $e) {
-        $conn->rollback();
-        return false;
+        // Jangan biarkan error DB mencegah login — rollback lalu izinkan masuk
+        try { $conn->rollback(); } catch (Throwable $_) {}
+        return true; // Graceful degradation: login berhasil, single-session tidak aktif sementara
     }
 }
 

@@ -279,7 +279,7 @@ CREATE TABLE `karyawan` (
   `created_at` datetime DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `nip` (`nip`),
-  KEY `user_id` (`user_id`),
+  UNIQUE KEY `uq_karyawan_user_id` (`user_id`),
   KEY `divisi_id` (`divisi_id`),
   KEY `atasan_id` (`atasan_id`),
   CONSTRAINT `karyawan_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
