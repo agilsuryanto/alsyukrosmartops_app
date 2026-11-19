@@ -193,8 +193,9 @@ try {
             if ($stok < 0) fail('Stok tidak boleh negatif.');
             $status = $_POST['status'] ?? 'tersedia';
             if (!in_array($status, ['tersedia', 'habis', 'rusak'], true)) fail('Status barang tidak valid.');
-            $stmt = $conn->prepare("UPDATE barang SET nama_barang = ?, kategori = ?, lokasi = ?, stok = ?, status = ? WHERE id = ?");
-            $stmt->bind_param("sssisi", $nama, $kategori, $lokasi, $stok, $status, $id);
+            $ket = trim($_POST['keterangan'] ?? '');
+            $stmt = $conn->prepare("UPDATE barang SET nama_barang = ?, kategori = ?, lokasi = ?, stok = ?, status = ?, keterangan = ? WHERE id = ?");
+            $stmt->bind_param("sssissi", $nama, $kategori, $lokasi, $stok, $status, $ket, $id);
             $stmt->execute();
             logAktivitas($user['id'], 'inventaris', "Memperbarui data barang #$id");
             ok();
